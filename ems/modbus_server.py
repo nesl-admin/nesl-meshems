@@ -102,19 +102,23 @@ class SunSpecModbusServer:
         except Exception as e:
             self.logger.error(f"Error updating SunSpec registers: {e}")
     
-    def update_from_solark(self, solark_data):
-        """Update SunSpec models with Sol-Ark data"""
+    def update_from_inverter(self, inverter_data):
+        """Update SunSpec models with inverter data"""
         try:
             # Update SunSpec mapper with new data
-            self.sunspec_mapper.update_from_solark(solark_data)
+            self.sunspec_mapper.update_from_inverter(inverter_data)
             
             # Update Modbus registers
             self._update_sunspec_registers()
             
-            self.logger.debug("Updated Modbus server with Sol-Ark data")
+            self.logger.debug(f"Updated Modbus server with {inverter_data.get_inverter_type()} data")
             
         except Exception as e:
             self.logger.error(f"Error updating Modbus server: {e}")
+    
+    def update_from_solark(self, solark_data):
+        """Legacy method for backward compatibility"""
+        self.update_from_inverter(solark_data)
     
     def start(self):
         """Start the Modbus TCP server in a separate thread"""

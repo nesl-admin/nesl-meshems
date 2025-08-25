@@ -77,7 +77,8 @@ class EMSApplication:
                 "baudrate": 9600,
                 "timeout": 1.0
             },
-            "solark": {
+            "inverter": {
+                "type": "solark_split_phase",
                 "modbus_address": 1,
                 "poll_interval": 5.0,
                 "max_retries": 3,
@@ -134,12 +135,12 @@ class EMSApplication:
         try:
             # Initialize Sol-Ark client
             serial_config = self.config.get("serial", {})
-            solark_config = self.config.get("solark", {})
+            inverter_config = self.config.get("inverter", {})
             
             self.solark_client = SolArkModbusClient(
                 port=serial_config.get("port", "/dev/ttyUSB0"),
                 baudrate=serial_config.get("baudrate", 9600),
-                modbus_address=solark_config.get("modbus_address", 1)
+                modbus_address=inverter_config.get("modbus_address", 1)
             )
             
             # Connect to Sol-Ark
@@ -249,7 +250,7 @@ class EMSApplication:
             self.running = True
             
             # Get configuration
-            poll_interval = self.config.get("solark", {}).get("poll_interval", 5.0)
+            poll_interval = self.config.get("inverter", {}).get("poll_interval", 5.0)
             console_output = self.config.get("monitoring", {}).get("console_output", True)
             console_update_interval = self.config.get("monitoring", {}).get("console_update_interval", 10.0)
             
