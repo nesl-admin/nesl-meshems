@@ -97,10 +97,10 @@ class EMSApplication:
                 "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
             },
             "device_info": {
-                "manufacturer": "Energy IoT Open Source",
-                "model": "EMS-Dev Python",
+                "manufacturer": "Energy IOT",
+                "model": "SA-GW",
                 "version": "1.0.0",
-                "serial_number": "EMS-PY-001",
+                "serial_number": "MESH-EMS",
                 "options": "Sol-Ark Gateway"
             },
             "monitoring": {
@@ -448,7 +448,23 @@ class EMSApplication:
             last_console_update = 0
             
             if console_output:
-                self.console.print("[bold green]EMS-Dev Python Gateway Started[/bold green]")
+                self.console.print("[bold green]" + """
+███████╗███╗   ██╗███████╗██████╗  ██████╗ ██╗   ██╗    ██╗ ██████╗ ████████╗
+██╔════╝████╗  ██║██╔════╝██╔══██╗██╔════╝ ╚██╗ ██╔╝    ██║██╔═══██╗╚══██╔══╝
+█████╗  ██╔██╗ ██║█████╗  ██████╔╝██║  ███╗ ╚████╔╝     ██║██║   ██║   ██║
+██╔══╝  ██║╚██╗██║██╔══╝  ██╔══██╗██║   ██║  ╚██╔╝      ██║██║   ██║   ██║
+███████╗██║ ╚████║███████╗██║  ██║╚██████╔╝   ██║       ██║╚██████╔╝   ██║
+╚══════╝╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝ ╚═════╝    ╚═╝       ╚═╝ ╚═════╝    ╚═╝
+""" + "[/bold green]")
+                self.console.print("[bold yellow]" + """
+███╗   ███╗███████╗███████╗██╗  ██╗███████╗███╗   ███╗███████╗
+████╗ ████║██╔════╝██╔════╝██║  ██║██╔════╝████╗ ████║██╔════╝
+██╔████╔██║█████╗  ███████╗███████║█████╗  ██╔████╔██║███████╗
+██║╚██╔╝██║██╔══╝  ╚════██║██╔══██║██╔══╝  ██║╚██╔╝██║╚════██║
+██║ ╚═╝ ██║███████╗███████║██║  ██║███████╗██║ ╚═╝ ██║███████║
+╚═╝     ╚═╝╚══════╝╚══════╝╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝╚══════╝
+""" + "[/bold yellow]")
+                self.console.print("[bold]Program: pysunspec-gw Started[/bold]")
                 self.console.print(f"Inverter Type: {self.inverter_client.get_inverter_type()}")
                 self.console.print(f"Polling inverter every {poll_interval} seconds")
                 if self.modbus_server:

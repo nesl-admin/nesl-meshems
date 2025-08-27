@@ -19,7 +19,7 @@ class SunSpecCommonModel:
     # Fixed header
     sunspec_id = 0x53756E53  # 'SunS' in ASCII
     model_id = 1
-    model_length = 66  # Match C implementation
+    model_length = 66
     
     # Device information
     manufacturer = "Energy IoT Open Source"
@@ -135,7 +135,7 @@ class SunSpecDCPort:
 
 @dataclass
 class SunSpec714Model:
-    """SunSpec DER DC Measurement Model (Model 714) - 4x PV ports + 1x ESS port"""
+    """SunSpec DER DC Measurement Model (Model 714) - Dynamic port configuration based on inverter type"""
     
     # Model header
     model_id: int = 714
@@ -143,7 +143,7 @@ class SunSpec714Model:
     
     # General DC measurements
     port_alarms: int = 0  # PrtAlrms - Bitfield of ports with active alarms
-    num_ports: int = 5  # NPrt - Number of DC ports (4 PV + 1 ESS)
+    num_ports: int = 5  # NPrt - Default: 4 PV + 1 ESS (will be updated based on inverter type)
     total_dc_current: float = 0.0  # DCA - Total DC current for all ports
     total_dc_power: float = 0.0  # DCW - Total DC power for all ports
     total_dc_energy_injected: int = 0  # DCWhInj - Total cumulative DC energy injected
@@ -156,16 +156,38 @@ class SunSpec714Model:
     energy_sf: int = -3  # DCWH_SF - DC energy scale factor
     temperature_sf: int = -1  # Tmp_SF - Temperature scale factor
     
-    # DC Ports (4 PV + 1 ESS)
-    ports: list = field(default_factory=lambda: [
-        SunSpecDCPort(port_type=0, port_id=1, port_id_string="MPPT1"),      # PV Port 1
-        SunSpecDCPort(port_type=0, port_id=2, port_id_string="MPPT2"),      # PV Port 2
-        SunSpecDCPort(port_type=0, port_id=3, port_id_string="MPPT3"),      # PV Port 3
-        SunSpecDCPort(port_type=0, port_id=4, port_id_string="MPPT"),      # PV Port 4 (uninitialized)
-        SunSpecDCPort(port_type=1, port_id=5, port_id_string="BATT1")     # Battery Port 1
-    ])
+    # DC Ports - will be configured dynamically based on inverter type
+    ports: list = field(default_factory=list)
     
     def __post_init__(self):
+        """Initialize ports if not already configured"""
+        if not self.ports:
+            self.configure_ports_for_inverter_type(3)  # Default to 3-phase configuration
+    
+    def configure_ports_for_inverter_type(self, phase_count: int):
+        """Configure ports based on inverter type (phase count)"""
+        # Always have 4 PV ports (with PV4 uninitialized)
+        self.ports = [
+            SunSpecDCPort(port_type=0, port_id=1, port_id_string="MPPT1"),      # PV Port 1 (register 672/676/677)
+            SunSpecDCPort(port_type=0, port_id=2, port_id_string="MPPT2"),      # PV Port 2 (register 673/678/679)
+            SunSpecDCPort(port_type=0, port_id=3, port_id_string="MPPT3"),      # PV Port 3 (register 674/680/681)
+            SunSpecDCPort(port_type=0, port_id=4, port_id_string="MPPT4"),      # PV Port 4 (register 675/682/683) - uninitialized
+            SunSpecDCPort(port_type=1, port_id=5, port_id_string="BATT1")       # Battery Port 1 (register 590/587/591)
+        ]
+        
+        # For split-phase/single-phase systems, use 5 ports; for 3-phase, use 6 ports
+        if phase_count == 2:  # Split-phase or single-phase
+            self.num_ports = 5  # 4 PV + 1 ESS (for single-phase and split-phase)
+        else:  # 3-phase
+            self.ports.append(
+                SunSpecDCPort(port_type=1, port_id=6, port_id_string="BATT2")   # Battery Port 2 (register 595/593/594)
+            )
+            self.num_ports = 6  # 4 PV + 2 ESS
+        
+        # Recalculate model length
+        self._calculate_model_length()
+    
+    def _calculate_model_length(self):
         """Calculate model length based on number of ports"""
         # Base model: 2 (header) + 2 (PrtAlrms) + 1 (NPrt) + 1 (DCA) + 1 (DCW) + 4 (DCWhInj) + 4 (DCWhAbs) + 5 (scale factors) = 20
         # Per port: 1 (PrtTyp) + 1 (ID) + 8 (IDStr) + 1 (DCA) + 1 (DCV) + 1 (DCW) + 4 (DCWhInj) + 4 (DCWhAbs) + 1 (Tmp) + 1 (DCSta) + 2 (DCAlrm) = 25
@@ -184,7 +206,7 @@ class SunSpecRegisterMap:
     LOAD_MODEL_BASE = GRID_MODEL_BASE + 153 + 2  # 40225 (after Grid Model + header)
     STORAGE_MODEL_BASE = LOAD_MODEL_BASE + 153 + 2  # 40380 (after Load Model + header)
     DC_MODEL_BASE = STORAGE_MODEL_BASE + 7 + 2  # 40389 (after Storage Model + header)
-    END_MODEL_BASE = DC_MODEL_BASE + 143 + 2  # 40534 (after DC Model + header, 143 = 18 base + 5*25 ports)
+    # END_MODEL_BASE will be calculated dynamically based on actual number of ports
     
     # SunSpec Header
     SUNSPEC_ID = SUNSPEC_BASE_ADDR  # 40000-40001 (2 registers)
@@ -266,17 +288,25 @@ class SunSpecRegisterMap:
     DC_PORT2_BASE = DC_PORT1_BASE + 25  # 40434 - PV Port 2
     DC_PORT3_BASE = DC_PORT2_BASE + 25  # 40459 - PV Port 3
     DC_PORT4_BASE = DC_PORT3_BASE + 25  # 40484 - PV Port 4 (uninitialized)
-    DC_PORT5_BASE = DC_PORT4_BASE + 25  # 40509 - ESS Port 1
+    DC_PORT5_BASE = DC_PORT4_BASE + 25  # 40509 - ESS Port 1 (Battery 1)
+    DC_PORT6_BASE = DC_PORT5_BASE + 25  # 40534 - ESS Port 2 (Battery 2) - only for 3-phase
     
-    # End-of-map marker
-    END_MODEL_ID = END_MODEL_BASE + 0  # 40534 - Model ID 65535 (0xFFFF)
-    END_MODEL_LENGTH = END_MODEL_BASE + 1  # 40535 - Length 0
+    @classmethod
+    def calculate_end_model_base(cls, num_ports: int) -> int:
+        """Calculate END_MODEL_BASE dynamically based on number of DC ports"""
+        model_length = 18 + (num_ports * 25)  # 18 base + num_ports * 25 registers per port
+        return cls.DC_MODEL_BASE + model_length + 2  # +2 for header
+    
+    @classmethod
+    def get_end_model_registers(cls, num_ports: int) -> tuple:
+        """Get END_MODEL register addresses based on number of ports"""
+        end_base = cls.calculate_end_model_base(num_ports)
+        return (end_base, end_base + 1)  # (END_MODEL_ID, END_MODEL_LENGTH)
     
 
 
 class SunSpecMapper:
     """Maps Sol-Ark data to SunSpec models with dual 701 instances"""
-    
     # Constants for register initialization
     NULL_UINT16 = 0xFFFF  # Not implemented value for unsigned 16-bit
     NULL_INT16 = 0x8000   # Not implemented value for signed 16-bit
@@ -304,15 +334,23 @@ class SunSpecMapper:
         91: "AL3"
     }
     
-    def __init__(self, device_info):
+    def __init__(self, device_info, inverter_type="3phase"):
         """
         Initialize SunSpec mapper
         
         Args:
             device_info: Device information dictionary
+            inverter_type: Type of inverter ("split_phase", "3phase", etc.)
         """
         self.logger = logging.getLogger(__name__)
         self.device_info = device_info
+        self.inverter_type = inverter_type
+                
+        # Determine phase count from inverter type
+        if "split" in inverter_type.lower() or "single" in inverter_type.lower():
+            self.phase_count = 2  # Split-phase or single-phase
+        else:
+            self.phase_count = 3  # 3-phase
         
         # Initialize models
         self.common_model = SunSpecCommonModel()
@@ -333,7 +371,10 @@ class SunSpecMapper:
         self.grid_model = SunSpecGridModel()
         self.load_model = SunSpecLoadModel()
         self.battery_model = SunSpecBatteryModel()
+        
+        # Initialize DC model with appropriate port configuration
         self.dc_model = SunSpec714Model()
+        self.dc_model.configure_ports_for_inverter_type(self.phase_count)
         
         # Register map for Modbus server
         self.registers = {}
@@ -416,7 +457,7 @@ class SunSpecMapper:
             self._set_register(SunSpecRegisterMap.STORAGE_MODEL_BASE + i, 0xFFFF)
         
         # Set scale factors for storage model
-        self._set_register(SunSpecRegisterMap.STORAGE_SF_ENERGY, -3)  # Energy scale factor: -3 (0.001)
+        self._set_register(SunSpecRegisterMap.STORAGE_SF_ENERGY, 0)  # Energy scale factor: 0 (1) - values in Wh
         self._set_register(SunSpecRegisterMap.STORAGE_SF_PERCENT, -1)  # Percentage scale factor: -1 (0.1)
         
         ###############################################
@@ -444,12 +485,19 @@ class SunSpecMapper:
         self._set_register(SunSpecRegisterMap.DC_ENERGY_SF, self.dc_model.energy_sf)
         self._set_register(SunSpecRegisterMap.DC_TEMP_SF, self.dc_model.temperature_sf)
         
-        # Initialize DC ports
+        # Initialize DC ports dynamically based on actual number of ports
         port_bases = [SunSpecRegisterMap.DC_PORT1_BASE, SunSpecRegisterMap.DC_PORT2_BASE,
                      SunSpecRegisterMap.DC_PORT3_BASE, SunSpecRegisterMap.DC_PORT4_BASE,
                      SunSpecRegisterMap.DC_PORT5_BASE]
         
+        # Add 6th port base only if we have 6 ports (3-phase systems)
+        if self.dc_model.num_ports == 6:
+            port_bases.append(SunSpecRegisterMap.DC_PORT6_BASE)
+        
         for i, port_base in enumerate(port_bases):
+            if i >= len(self.dc_model.ports):
+                break  # Don't initialize ports that don't exist
+                
             port = self.dc_model.ports[i]
             
             # Port type and ID
@@ -466,6 +514,12 @@ class SunSpecMapper:
                 self._set_register(port_base + 12, 0xFFFF)  # DCW - uninitialized
                 self._set_register(port_base + 21, 0x8000)  # Tmp - uninitialized (signed)
                 self._set_register(port_base + 22, 0xFFFF)  # DCSta - uninitialized
+            elif i == 5 and self.dc_model.num_ports == 6:  # Port 6 (Battery 2) - only for 3-phase
+                self._set_register(port_base + 10, 0)  # DCA - initialized to 0
+                self._set_register(port_base + 11, 0)  # DCV - initialized to 0
+                self._set_register(port_base + 12, 0)  # DCW - initialized to 0
+                self._set_register(port_base + 21, 0)  # Tmp - initialized to 0
+                self._set_register(port_base + 22, 0)  # DCSta - OFF
             else:
                 self._set_register(port_base + 10, 0)  # DCA
                 self._set_register(port_base + 11, 0)  # DCV
@@ -488,9 +542,96 @@ class SunSpecMapper:
             else:
                 self._set_register_32bit(port_base + 23, 0)  # DCAlrm
         
-        # End-of-map marker (Model ID 65535, Length 0)
-        self._set_register(SunSpecRegisterMap.END_MODEL_ID, 65535)  # 0xFFFF
-        self._set_register(SunSpecRegisterMap.END_MODEL_LENGTH, 0)
+        # End-of-map marker (Model ID 65535, Length 0) - calculated dynamically
+        end_model_id, end_model_length = SunSpecRegisterMap.get_end_model_registers(self.dc_model.num_ports)
+        self._set_register(end_model_id, 65535)  # 0xFFFF
+        self._set_register(end_model_length, 0)
+    
+    def _initialize_dc_model_registers(self):
+        """Re-initialize DC model registers when port configuration changes"""
+        # DC Model (714) header
+        self._set_register(SunSpecRegisterMap.DC_MODEL_ID, self.dc_model.model_id)
+        self._set_register(SunSpecRegisterMap.DC_MODEL_LENGTH, self.dc_model.model_length)
+        
+        # Initialize DC model general registers
+        self._set_register_32bit(SunSpecRegisterMap.DC_PORT_ALARMS, 0)  # No port alarms initially
+        self._set_register(SunSpecRegisterMap.DC_NUM_PORTS, self.dc_model.num_ports)
+        self._set_register(SunSpecRegisterMap.DC_TOTAL_CURRENT, 0)  # Will be updated with real data
+        self._set_register(SunSpecRegisterMap.DC_TOTAL_POWER, 0)  # Will be updated with real data
+        
+        # Initialize total energy registers (64-bit values)
+        for i in range(4):
+            self._set_register(SunSpecRegisterMap.DC_TOTAL_ENERGY_INJ + i, 0)
+            self._set_register(SunSpecRegisterMap.DC_TOTAL_ENERGY_ABS + i, 0)
+        
+        # Set scale factors for DC model
+        self._set_register(SunSpecRegisterMap.DC_CURRENT_SF, self.dc_model.current_sf)
+        self._set_register(SunSpecRegisterMap.DC_VOLTAGE_SF, self.dc_model.voltage_sf)
+        self._set_register(SunSpecRegisterMap.DC_POWER_SF, self.dc_model.power_sf)
+        self._set_register(SunSpecRegisterMap.DC_ENERGY_SF, self.dc_model.energy_sf)
+        self._set_register(SunSpecRegisterMap.DC_TEMP_SF, self.dc_model.temperature_sf)
+        
+        # Initialize DC ports dynamically based on actual number of ports
+        port_bases = [SunSpecRegisterMap.DC_PORT1_BASE, SunSpecRegisterMap.DC_PORT2_BASE,
+                     SunSpecRegisterMap.DC_PORT3_BASE, SunSpecRegisterMap.DC_PORT4_BASE,
+                     SunSpecRegisterMap.DC_PORT5_BASE]
+        
+        # Add 6th port base only if we have 6 ports (3-phase systems)
+        if self.dc_model.num_ports == 6:
+            port_bases.append(SunSpecRegisterMap.DC_PORT6_BASE)
+        
+        for i, port_base in enumerate(port_bases):
+            if i >= len(self.dc_model.ports):
+                break  # Don't initialize ports that don't exist
+                
+            port = self.dc_model.ports[i]
+            
+            # Port type and ID
+            self._set_register(port_base + 0, port.port_type)  # PrtTyp
+            self._set_register(port_base + 1, port.port_id)    # ID
+            
+            # Port ID string (8 registers)
+            self._set_string_registers(port_base + 2, port.port_id_string, 8)
+            
+            # Initialize port measurements (will be updated with real data)
+            if i == 3:  # Port 4 (PV4) - set as uninitialized
+                self._set_register(port_base + 10, 0xFFFF)  # DCA - uninitialized
+                self._set_register(port_base + 11, 0xFFFF)  # DCV - uninitialized
+                self._set_register(port_base + 12, 0xFFFF)  # DCW - uninitialized
+                self._set_register(port_base + 21, 0x8000)  # Tmp - uninitialized (signed)
+                self._set_register(port_base + 22, 0xFFFF)  # DCSta - uninitialized
+            elif i == 5 and self.dc_model.num_ports == 6:  # Port 6 (Battery 2) - only for 3-phase
+                self._set_register(port_base + 10, 0)  # DCA - initialized to 0
+                self._set_register(port_base + 11, 0)  # DCV - initialized to 0
+                self._set_register(port_base + 12, 0)  # DCW - initialized to 0
+                self._set_register(port_base + 21, 0)  # Tmp - initialized to 0
+                self._set_register(port_base + 22, 0)  # DCSta - OFF
+            else:
+                self._set_register(port_base + 10, 0)  # DCA
+                self._set_register(port_base + 11, 0)  # DCV
+                self._set_register(port_base + 12, 0)  # DCW
+                self._set_register(port_base + 21, 0)  # Tmp
+                self._set_register(port_base + 22, 0)  # DCSta - OFF
+            
+            # Initialize energy registers (64-bit values)
+            for j in range(4):
+                if i == 3:  # Port 4 - uninitialized
+                    self._set_register(port_base + 13 + j, 0xFFFF)  # DCWhInj
+                    self._set_register(port_base + 17 + j, 0xFFFF)  # DCWhAbs
+                else:
+                    self._set_register(port_base + 13 + j, 0)  # DCWhInj
+                    self._set_register(port_base + 17 + j, 0)  # DCWhAbs
+            
+            # Initialize alarm register (32-bit)
+            if i == 3:  # Port 4 - uninitialized
+                self._set_register_32bit(port_base + 23, 0xFFFFFFFF)  # DCAlrm
+            else:
+                self._set_register_32bit(port_base + 23, 0)  # DCAlrm
+        
+        # Update end-of-map marker with new port configuration
+        end_model_id, end_model_length = SunSpecRegisterMap.get_end_model_registers(self.dc_model.num_ports)
+        self._set_register(end_model_id, 65535)  # 0xFFFF
+        self._set_register(end_model_length, 0)
     
     def _set_register(self, address, value):
         """Set a single register value with validation"""
@@ -577,6 +718,15 @@ class SunSpecMapper:
         """Update SunSpec models with inverter data (supports both split-phase and 3-phase)"""
         try:
             phase_count = inverter_data.get_phase_count()
+
+            #Log the interpreted phase type as read from the inverter registers
+            self.logger.debug(f"Inverter reported phase type: {phase_count}")
+            
+            # Configure DC model ports based on actual inverter phase count
+            if self.dc_model.num_ports != (6 if phase_count == 3 else 5):
+                self.dc_model.configure_ports_for_inverter_type(phase_count)
+                # Re-initialize DC model registers with new port configuration
+                self._initialize_dc_model_registers()
             
             # Update Grid model with grid-side measurements
             if phase_count == 2:
@@ -637,14 +787,38 @@ class SunSpecMapper:
             self.load_model.operating_state = operating_state
             self.load_model.vendor_operating_state = vendor_state
             
-            # Update battery model
-            self.battery_model.battery_voltage = inverter_data.battery_voltage
-            self.battery_model.battery_current = inverter_data.battery_current
-            self.battery_model.battery_power = inverter_data.battery_power
-            self.battery_model.battery_soc = inverter_data.battery_soc
-            self.battery_model.battery_temperature = inverter_data.battery_temperature
-            self.battery_model.battery_capacity = inverter_data.battery_capacity
-            self.battery_model.battery_energy_capacity = inverter_data.battery_capacity * inverter_data.battery_voltage
+            # Update battery model with Model 713 and 714 data
+            # Use Model 714 battery fields if available, otherwise fallback to legacy fields
+            if hasattr(inverter_data, 'battery_1_voltage'):
+                self.battery_model.battery_voltage = inverter_data.battery_1_voltage
+            else:
+                self.battery_model.battery_voltage = getattr(inverter_data, 'battery_voltage', 0.0)
+            
+            if hasattr(inverter_data, 'battery_1_current'):
+                self.battery_model.battery_current = inverter_data.battery_1_current
+            else:
+                self.battery_model.battery_current = getattr(inverter_data, 'battery_current', 0.0)
+            
+            if hasattr(inverter_data, 'battery_1_power'):
+                self.battery_model.battery_power = inverter_data.battery_1_power
+            else:
+                self.battery_model.battery_power = getattr(inverter_data, 'battery_power', 0.0)
+            
+            self.battery_model.battery_soc = getattr(inverter_data, 'battery_soc', 0.0)
+            self.battery_model.battery_temperature = getattr(inverter_data, 'battery_temperature', 0.0)
+            self.battery_model.battery_capacity = getattr(inverter_data, 'battery_capacity', 0.0)
+            
+            # Model 713 specific fields from CSV mapping
+            self.battery_model.battery_calculated_capacity = getattr(inverter_data, 'battery_calculated_capacity', 0.0)
+            self.battery_model.battery_soc_713 = getattr(inverter_data, 'battery_soc_713', 0.0)
+            self.battery_model.battery_soh = getattr(inverter_data, 'battery_soh', 100.0)
+            
+            # Calculate energy capacity using Model 713 data (register 592 * nominal voltage)
+            capacity_ah = self.battery_model.battery_calculated_capacity if self.battery_model.battery_calculated_capacity > 0 else self.battery_model.battery_capacity
+            # Use Model 714 battery voltage if available (register 587), otherwise use legacy voltage
+            voltage = getattr(inverter_data, 'battery_1_voltage', self.battery_model.battery_voltage)
+            self.battery_model.battery_energy_capacity = capacity_ah * voltage
+            
             self.battery_model.battery_status = self._map_storage_status(inverter_data)
             
             # Update Modbus registers for both models
@@ -657,10 +831,6 @@ class SunSpecMapper:
             
         except Exception as e:
             self.logger.error(f"Error updating SunSpec models: {e}")
-    
-    def update_from_solark(self, solark_data):
-        """Legacy method for backward compatibility"""
-        self.update_from_inverter(solark_data)
     
     def _map_inverter_state(self, inverter_status):
         """Map Sol-Ark inverter status to SunSpec operating state"""
@@ -676,7 +846,7 @@ class SunSpecMapper:
         elif inverter_status == 4:  # Fault
             return 64  # Fault
         else:
-            return 1  # Off
+            return 0  # Off
     
     def _map_vendor_state(self, inverter_data):
         """Map inverter data to vendor-specific state bits"""
@@ -724,36 +894,69 @@ class SunSpecMapper:
         """Update grid registers from inverter data (supports both split-phase and 3-phase)"""
         self._update_grid_registers_common(inverter_data)
     
-    def update_grid_registers_from_solark(self, solark_data):
-        """Legacy method for backward compatibility"""
-        self.update_grid_registers_from_inverter(solark_data)
-    
     def _update_grid_registers_common(self, inverter_data):
         # Determine phase count and AC wiring type
         phase_count = inverter_data.get_phase_count()
+
+        # Set AC wiring type based on phase count and grid type from CSV mapping
+        # SunSpec Type enumeration:
+        # 0 = SINGLE_PHASE
+        # 1 = SPLIT_PHASE
+        # 2 = THREE_PHASE
         
-        # Set AC wiring type based on phase count and grid type
-        sunspec_ac_type = 0  # Default to Unknown
-        if phase_count == 1:
-            sunspec_ac_type = 0  # Single Phase
-        elif phase_count == 2:
-            sunspec_ac_type = 1  # Split Phase
-        elif phase_count == 3:
-            if inverter_data.grid_type == 0x02:  # Three-phase Wye
-                sunspec_ac_type = 2  # Three Phase Wye
+        # Sol-Ark LV enumeration:
+        # 000 = # Single phase 240V - 230V - 220V
+        # 001 = # Two Phase (Split-Phase) 120/240
+        # 002 = # Three phase 120/208V
+        
+        # Sol-Ark HV enumeration:
+        # 000 = # Three phase
+        # 001 = # Single phase 240V - 230V - 220V
+        # 002 = # Two Phase (Split-Phase) 120/240
+        sunspec_ac_type = 0  # Default to Single Phase
+
+        # Conditional logic required becuase the 3 phase modbus map inverts the logic vs the split-phase modbus map
+        
+        if phase_count == 2: #LV Inverter
+            # Use grid type from register 184 Grid Type
+            if hasattr(inverter_data, 'grid_type'):
+                self.logger.info(f"Grid type read from inverter: 0x{inverter_data.grid_type:04X}")
+                if inverter_data.grid_type == 0x0000:
+                    sunspec_ac_type = 0 # SINGLE_PHASE
+                elif inverter_data.grid_type == 0x0001:
+                    sunspec_ac_type = 1 # SPLIT_PHASE
+                elif inverter_data.grid_type == 0x0002:
+                    sunspec_ac_type = 2 #THREE_PHASE
+        
+        elif phase_count == 3: #HV Inverter
+            # Use grid type from register 184 Grid Type
+            if hasattr(inverter_data, 'grid_type'):
+                self.logger.info(f"Grid type read from inverter: 0x{inverter_data.grid_type:04X}")
+                if inverter_data.grid_type == 0x0000:  # Three Phase (default)
+                    sunspec_ac_type = 2  # Three Phase
+                elif inverter_data.grid_type == 0x0001:  # Single Phase
+                    sunspec_ac_type = 0  # Single Phase
+                elif inverter_data.grid_type == 0x0002:  # Split Phase
+                    sunspec_ac_type = 1  # Split Phase
             else:
-                sunspec_ac_type = 3  # Three Phase Delta (fallback)
+                sunspec_ac_type = 2  # Default to Three Phase for 3-phase systems
         
-        # SunSpec Operating State - Offset (2)
+        # SunSpec AC Wiring Type - Offset (2)
         self._set_register(SunSpecRegisterMap.GRID_AC_TYPE, sunspec_ac_type)
         
-        # SunSpec Operating State - Offset (3)
-        # Based on inverter status
-        self._set_register(SunSpecRegisterMap.GRID_OPERATING_STATE, 1 if inverter_data.inverter_status == 2 else 0)
+        # SunSpec Operating State - Offset (3) - from CSV register 551 (Power Button Status)
+        operating_state = 1  # Default to ON
+        if hasattr(inverter_data, 'power_button_status'):
+            self.logger.info(f"Power Button status from inverter: 0x{inverter_data.power_button_status:04X}")
+            operating_state = 1 if inverter_data.power_button_status == 1 else 0
+
+        self._set_register(SunSpecRegisterMap.GRID_OPERATING_STATE, operating_state)
         
-        # Inverter state mapping
-        inv_state = 0  # Default to OFF
-        if inverter_data.inverter_status == 1:  # Self-test
+        # Inverter state mapping from CSV register 500 (Operation Status)
+        inv_state = 0  # Default to O
+        if inverter_data.inverter_status == 0:  # Standby
+            inv_state = 7  # STANDBY
+        elif inverter_data.inverter_status == 1:  # Self-test
             inv_state = 2  # STARTING
         elif inverter_data.inverter_status == 2:  # Normal
             if inverter_data.grid_power > 100:
@@ -764,126 +967,203 @@ class SunSpecMapper:
             inv_state = 4  # THROTTLED
         elif inverter_data.inverter_status == 4:  # Fault
             inv_state = 6  # FAULT
+        elif inverter_data.inverter_status == 5:  # Activating
+            inv_state = 2  # STARTING
         else:
             inv_state = 0  # OFF
         
-        # SunSpec Grid Connection State - Offset (4)
+        # SunSpec Inverter State - Offset (4)
         self._set_register(SunSpecRegisterMap.GRID_STATUS, inv_state)
         
-        # SunSpec Grid Connection State - Offset (5)
-        grid_connected = 1 if inverter_data.grid_relay_status == 1 else 0
+        # SunSpec Grid Connection State - Offset (5) - Different registers for LV vs HV inverters
+        grid_connected = 0  # Default to DISCONNECTED
+        
+        # Check inverter type to determine which register to use
+        inverter_type_str = getattr(inverter_data, 'get_inverter_type', lambda: self.inverter_type)()
+        
+        if 'split_phase' in inverter_type_str.lower() or 'single' in inverter_type_str.lower():
+            # LV Inverter (Single/Split-phase) - Use register 194 (Grid side relay status)
+            # Direct value: 0=Open(Disconnect), 1=Closed(Connected)
+            if hasattr(inverter_data, 'grid_side_relay_status'):
+                grid_connected = 1 if inverter_data.grid_side_relay_status == 1 else 0
+        else:
+            # HV Inverter (3-phase) - Use register 552 (AC Relay Status)
+            # Bit 2: Grid relay (0: off 1: on)
+            if hasattr(inverter_data, 'grid_relay_status'):
+                grid_connected = 1 if (inverter_data.grid_relay_status & 0x04) != 0 else 0
         self._set_register(SunSpecRegisterMap.GRID_CONNECTION, grid_connected)
         
         # DER operational characteristics
         der_mode = 0
-        if inverter_data.grid_relay_status == 1:  # Connected to grid
+        if grid_connected == 1:  # Connected to grid
             der_mode |= 0x0000  # Grid Following
         else:  # Disconnected from grid
             der_mode |= 0x0001  # Grid Forming
         
-        # SunSpec Grid Connection State - Offset (8)
-        # Options: GRID_FOLLOWING, GRID_FORMING, PV_CLIPPED
+        # SunSpec DER Mode - Offset (8-9) - 32-bit bitfield
         self._set_register(SunSpecRegisterMap.GRID_DER_MODE, (der_mode >> 16) & 0xFFFF)
         self._set_register(SunSpecRegisterMap.GRID_DER_MODE + 1, der_mode & 0xFFFF)
         
-        # Alarm bitfield
+        # Alarm bitfield - Offset (6-7) - 32-bit bitfield
         self._set_register(SunSpecRegisterMap.GRID_ALARM, 0)
         self._set_register(SunSpecRegisterMap.GRID_ALARM + 1, 0)
         
-        # Power measurements
-        self._set_register(SunSpecRegisterMap.GRID_AC_POWER, int(inverter_data.grid_power))
+        # Power measurements - Different registers for LV vs HV inverters
+        # Check inverter type to determine which registers to use
+        inverter_type_str = getattr(inverter_data, 'get_inverter_type', lambda: self.inverter_type)()
         
-        # Apparent Power (VA)
-        self._set_register(SunSpecRegisterMap.GRID_AC_VA, int(inverter_data.apparent_power))
-        
-        # Reactive Power (VAR) - calculated as sqrt(VA^2 - W^2)
-        try:
-            va_squared = inverter_data.apparent_power ** 2
-            w_squared = inverter_data.grid_power ** 2
-            if va_squared >= w_squared:
-                reactive_power = int((va_squared - w_squared) ** 0.5)
-                # Determine sign based on power factor (leading/lagging)
-                if inverter_data.grid_power_factor < 0:
-                    reactive_power = -reactive_power
-            else:
-                reactive_power = 0  # Avoid negative square root
+        if 'split_phase' in inverter_type_str.lower() or 'single' in inverter_type_str.lower():
+            # LV Inverter (Single/Split-phase)
+            # Total Active Power - Offset (10) - from register 169 (Total power of grid side L1L2)
+            self._set_register(SunSpecRegisterMap.GRID_AC_POWER, int(getattr(inverter_data, 'grid_power_total_l1l2', inverter_data.grid_power)))
+            
+            # Apparent Power (VA) - Offset (11) - from register 38 (Apparent Power reading)
+            self._set_register(SunSpecRegisterMap.GRID_AC_VA, int(getattr(inverter_data, 'apparent_power_lv', inverter_data.apparent_power)))
+            
+            # Power Factor (PF) - Offset (13) - from register 89 (Grid Real Power Factor)
+            self._set_register(SunSpecRegisterMap.GRID_AC_PF, int(getattr(inverter_data, 'grid_real_power_factor', inverter_data.grid_power_factor) * 100))
+            
+            # Reactive Power (VAR) - Offset (12) - calculated from sqrt(VA^2 - W^2)
+            try:
+                va_squared = getattr(inverter_data, 'apparent_power_lv', inverter_data.apparent_power) ** 2
+                w_squared = getattr(inverter_data, 'grid_power_total_l1l2', inverter_data.grid_power) ** 2
+                if va_squared >= w_squared:
+                    reactive_power = int((va_squared - w_squared) ** 0.5)
+                    if getattr(inverter_data, 'grid_real_power_factor', inverter_data.grid_power_factor) < 0:
+                        reactive_power = -reactive_power
+                else:
+                    reactive_power = 0
+            except (ValueError, ZeroDivisionError):
+                reactive_power = 0
             self._set_register(SunSpecRegisterMap.GRID_AC_VAR, reactive_power)
-        except (ValueError, ZeroDivisionError):
-            self._set_register(SunSpecRegisterMap.GRID_AC_VAR, 0)
+            
+        else:
+            # HV Inverter (3-phase)
+            # Total Active Power - Offset (10) - from registers 625/690 (32-bit)
+            self._set_register(SunSpecRegisterMap.GRID_AC_POWER, int(inverter_data.grid_power))
+            
+            # Apparent Power (VA) - Offset (11) - from registers 608/704 (32-bit)
+            self._set_register(SunSpecRegisterMap.GRID_AC_VA, int(inverter_data.apparent_power))
+            
+            # Power Factor (PF) - Offset (13) - from register 621 (Grid Power Factor)
+            self._set_register(SunSpecRegisterMap.GRID_AC_PF, int(inverter_data.grid_power_factor * 100))
+            
+            # Reactive Power (VAR) - Offset (12) - from registers 710-712 (sum of L1, L2, L3)
+            if hasattr(inverter_data, 'grid_reactive_power_total'):
+                reactive_power = int(inverter_data.grid_reactive_power_total)
+            else:
+                # Fallback calculation if reactive power not available
+                try:
+                    va_squared = inverter_data.apparent_power ** 2
+                    w_squared = inverter_data.grid_power ** 2
+                    if va_squared >= w_squared:
+                        reactive_power = int((va_squared - w_squared) ** 0.5)
+                        if inverter_data.grid_power_factor < 0:
+                            reactive_power = -reactive_power
+                    else:
+                        reactive_power = 0
+                except (ValueError, ZeroDivisionError):
+                    reactive_power = 0
+            self._set_register(SunSpecRegisterMap.GRID_AC_VAR, reactive_power)
         
-        # Power Factor (PF) - Scale by 100 for SunSpec (PF_SF = -2, so 1.0 = 100)
-        self._set_register(SunSpecRegisterMap.GRID_AC_PF, int(inverter_data.grid_power_factor * 100))
-        
-        # Current and voltage measurements
-        if phase_count == 2:
+        # Current and voltage measurements - from CSV mapping
+        if 'split_phase' in inverter_type_str.lower() or 'single' in inverter_type_str.lower():
             # Split-phase calculations
             grid_current_total = abs(inverter_data.grid_current_l1 + inverter_data.grid_current_l2)
-        elif phase_count == 3:
-            # 3-phase calculations
-            grid_current_total = abs(inverter_data.grid_current_l1 + inverter_data.grid_current_l2 +
-                                   getattr(inverter_data, 'grid_current_l3', 0))
         else:
-            grid_current_total = abs(inverter_data.grid_current_l1)
-        
+            # 3-phase calculations - from registers 610-612
+            grid_current_total = abs(inverter_data.grid_current_l1 + inverter_data.grid_current_l2 + getattr(inverter_data, 'grid_current_l3', 0))
+    
+        # Total AC Current - Offset (14)
         self._set_register(SunSpecRegisterMap.GRID_AC_CURRENT, int(grid_current_total * 100))  # Scale by 100
-        self._set_register(SunSpecRegisterMap.GRID_AC_VOLTAGE_LL, int(inverter_data.grid_voltage_l1l2 * 10))  # Line1-to-Line2
-        self._set_register(SunSpecRegisterMap.GRID_AC_VOLTAGE_LN, int(inverter_data.grid_voltage_l1n * 10))  # Line1-to-Neutral
         
-        # Frequency
+        # Voltage LL - Offset (15) - Line-to-Line voltage (calculated from L-N * sqrt(3))
+        self._set_register(SunSpecRegisterMap.GRID_AC_VOLTAGE_LL, int(inverter_data.grid_voltage_l1l2 * 10))
+        
+        # Voltage LN - Offset (16) - Line-to-Neutral voltage from register 598
+        self._set_register(SunSpecRegisterMap.GRID_AC_VOLTAGE_LN, int(inverter_data.grid_voltage_l1n * 10))
+        
+        # Frequency - Offset (17-18) - 32-bit from CSV register 609
         frequency_scaled = int(inverter_data.grid_frequency * 100)
         self._set_register(SunSpecRegisterMap.GRID_AC_FREQUENCY, (frequency_scaled >> 16) & 0xFFFF)
         self._set_register(SunSpecRegisterMap.GRID_AC_FREQUENCY + 1, frequency_scaled & 0xFFFF)
         
-        # Energy measurements
-        energy_injected_wh = int(inverter_data.grid_sell_energy * 1000)  # Convert kWh to Wh
-        energy_absorbed_wh = int(inverter_data.grid_buy_energy * 1000)   # Convert kWh to Wh
+        # Energy measurements - placeholder (marked as UNIMPLEMENTED in CSV)
+        energy_injected_wh = int(getattr(inverter_data, 'grid_sell_energy', 0) * 1000)
+        energy_absorbed_wh = int(getattr(inverter_data, 'grid_buy_energy', 0) * 1000)
         
-        # Total Energy Injected (TotWhInj) - 4 registers for uint64
-        self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 19, 0)  # High 32 bits (upper 16)
-        self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 20, 0)  # High 32 bits (lower 16)
+        # Total Energy Injected (TotWhInj) - Offset (19-22) - 4 registers for uint64
+        self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 19, 0)
+        self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 20, 0)
         self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 21, (energy_injected_wh >> 16) & 0xFFFF)
         self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 22, energy_injected_wh & 0xFFFF)
         
-        # Total Energy Absorbed (TotWhAbs) - 4 registers for uint64
-        self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 23, 0)  # High 32 bits (upper 16)
-        self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 24, 0)  # High 32 bits (lower 16)
+        # Total Energy Absorbed (TotWhAbs) - Offset (23-26) - 4 registers for uint64
+        self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 23, 0)
+        self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 24, 0)
         self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 25, (energy_absorbed_wh >> 16) & 0xFFFF)
         self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 26, energy_absorbed_wh & 0xFFFF)
         
-        # Temperature measurements - shared with Load model
-        self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 37, int(inverter_data.igbt_temp * 10))  # Heat Sink temp
-        self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 38, int(inverter_data.dcdc_xfrmr_temp * 10))  # Transformer temp
+        # Temperature measurements - from CSV registers 540-541
+        # Heat Sink Temperature - Offset (37) - from CSV register 541
+        self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 37, int(inverter_data.dcdc_xfrmr_temp * 10))
+        # Transformer Temperature - Offset (38) - set to unimplemented
+        self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 38, self.NULL_INT16)
+        # IGBT/MOSFET Temperature - Offset (39) - from CSV register 540
+        self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 39, int(inverter_data.igbt_temp * 10))
         
-        # Phase-specific measurements
-        if phase_count == 2:
+        # Phase-specific measurements using actual register mappings from CSV
+        if 'split_phase' in inverter_type_str.lower() or 'single' in inverter_type_str.lower():
             # Split-phase L1 and L2 measurements
-            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 41, int(inverter_data.grid_power / 2))  # WL1: Approximate L1 power
-            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 45, int(inverter_data.grid_current_l1 * 100))  # Current L1
-            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 46, int(inverter_data.grid_voltage_l1l2 * 10))  # VL1L2: Grid voltage L1-L2
-            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 47, int(inverter_data.grid_voltage_l1n * 10))  # VL1: Grid voltage L1-N
+            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 41, int(inverter_data.grid_power / 2))  # WL1
+            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 45, int(inverter_data.grid_current_l1 * 100))  # AL1
+            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 46, int(inverter_data.grid_voltage_l1l2 * 10))  # VL1L2
+            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 47, int(inverter_data.grid_voltage_l1n * 10))  # VL1
             
-            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 64, int(inverter_data.grid_power / 2))  # WL2: Approximate L2 power
-            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 68, int(inverter_data.grid_current_l2 * 100))  # Current L2
-            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 70, int(inverter_data.grid_voltage_l2n * 10))  # VL2: Grid voltage L2-N
+            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 64, int(inverter_data.grid_power / 2))  # WL2
+            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 68, int(inverter_data.grid_current_l2 * 100))  # AL2
+            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 70, int(inverter_data.grid_voltage_l2n * 10))  # VL2
         
-        elif phase_count == 3:
-            # 3-phase L1, L2, and L3 measurements
-            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 41, int(inverter_data.grid_power / 3))  # WL1: Approximate L1 power
-            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 45, int(inverter_data.grid_current_l1 * 100))  # Current L1
-            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 46, int(inverter_data.grid_voltage_l1l2 * 10))  # VL1L2: Grid voltage L1-L2
-            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 47, int(inverter_data.grid_voltage_l1n * 10))  # VL1: Grid voltage L1-N
+        else:
+            # 3-phase L1, L2, and L3 measurements using actual power values from CSV
+            # WL1 - Offset (41) - from registers 622/687 (32-bit)
+            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 41, int(getattr(inverter_data, 'grid_power_l1', inverter_data.grid_power / 3)))
+            # VarL1 - Offset (43) - from register 710
+            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 43, int(getattr(inverter_data, 'grid_reactive_power_l1', 0)))
+            # AL1 - Offset (45) - from register 610
+            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 45, int(inverter_data.grid_current_l1 * 100))
+            # VL1L2 - Offset (46) - calculated from register 598 * sqrt(3)
+            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 46, int(inverter_data.grid_voltage_l1l2 * 10))
+            # VL1 - Offset (47) - from register 598
+            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 47, int(inverter_data.grid_voltage_l1n * 10))
             
-            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 64, int(inverter_data.grid_power / 3))  # WL2: Approximate L2 power
-            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 68, int(inverter_data.grid_current_l2 * 100))  # Current L2
-            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 70, int(inverter_data.grid_voltage_l2n * 10))  # VL2: Grid voltage L2-N
+            # WL2 - Offset (64) - from registers 623/688 (32-bit)
+            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 64, int(getattr(inverter_data, 'grid_power_l2', inverter_data.grid_power / 3)))
+            # VarL2 - Offset (66) - from register 711
+            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 66, int(getattr(inverter_data, 'grid_reactive_power_l2', 0)))
+            # AL2 - Offset (68) - from register 611
+            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 68, int(inverter_data.grid_current_l2 * 100))
+            # VL2L3 - Offset (69) - calculated from register 599 * sqrt(3)
+            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 69, int(getattr(inverter_data, 'grid_voltage_l2l3', 0) * 10))
+            # VL2 - Offset (70) - from register 599
+            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 70, int(getattr(inverter_data, 'grid_voltage_l2n', 0) * 10))
             
-            # L3 measurements (using L3 registers in SunSpec Model 701)
-            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 87, int(inverter_data.grid_power / 3))  # WL3: Approximate L3 power
-            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 91, int(getattr(inverter_data, 'grid_current_l3', 0) * 100))  # Current L3
-            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 89, int(getattr(inverter_data, 'grid_voltage_l3n', 0) * 10))  # VL3: Grid voltage L3-N
+            # WL3 - Offset (87) - from registers 624/689 (32-bit)
+            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 87, int(getattr(inverter_data, 'grid_power_l3', inverter_data.grid_power / 3)))
+            # VarL3 - Offset (89) - from register 712
+            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 89, int(getattr(inverter_data, 'grid_reactive_power_l3', 0)))
+            # AL3 - Offset (91) - from register 612
+            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 91, int(getattr(inverter_data, 'grid_current_l3', 0) * 100))
+            # VL3L1 - Offset (92) - calculated from register 600 * sqrt(3)
+            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 92, int(getattr(inverter_data, 'grid_voltage_l3l1', 0) * 10))
+            # VL3 - Offset (93) - from register 600
+            self._set_register(SunSpecRegisterMap.GRID_MODEL_BASE + 93, int(getattr(inverter_data, 'grid_voltage_l3n', 0) * 10))
         
-        # Vendor-specific status information
-        alarm_info = f"Power:{inverter_data.grid_power:.0f}W Type:{inverter_data.get_inverter_type()}"
+        # Vendor-specific status information - Offset (123-154) - 32 registers for string
+        if phase_count == 3:
+            alarm_info = alarm_info = f"Kilroy was here"
+        else:
+            alarm_info = f"Kilroy was here"
         self._set_string_registers(SunSpecRegisterMap.GRID_MODEL_BASE + 123, alarm_info, 32)
     
     
@@ -894,32 +1174,59 @@ class SunSpecMapper:
         """Update load registers from inverter data (supports both split-phase and 3-phase)"""
         self._update_load_registers_common(inverter_data)
     
-    def update_load_registers_from_solark(self, solark_data):
-        """Legacy method for backward compatibility"""
-        self.update_load_registers_from_inverter(solark_data)
-    
     def _update_load_registers_common(self, inverter_data):
         # Determine phase count and AC wiring type
         phase_count = inverter_data.get_phase_count()
+
+        # Set AC wiring type based on phase count and grid type from CSV mapping
+        # SunSpec Type enumeration:
+        # 0 = SINGLE_PHASE
+        # 1 = SPLIT_PHASE
+        # 2 = THREE_PHASE
         
-        # Set AC wiring type based on phase count - same as Grid
-        sunspec_ac_type = 0  # Default to Unknown
-        if phase_count == 1:
-            sunspec_ac_type = 0  # Single Phase
-        elif phase_count == 2:
-            sunspec_ac_type = 1  # Split Phase
-        elif phase_count == 3:
-            if inverter_data.grid_type == 0x02:  # Three-phase Wye
-                sunspec_ac_type = 2  # Three Phase Wye
+        # Sol-Ark LV enumeration:
+        # 000 = # Single phase 240V - 230V - 220V
+        # 001 = # Two Phase (Split-Phase) 120/240
+        # 002 = # Three phase 120/208V
+        
+        # Sol-Ark HV enumeration:
+        # 000 = # Three phase
+        # 001 = # Single phase 240V - 230V - 220V
+        # 002 = # Two Phase (Split-Phase) 120/240
+        sunspec_ac_type = 0  # Default to Single Phase
+
+        # Conditional logic required becuase the 3 phase modbus map inverts the logic vs the split-phase modbus map
+        
+        if phase_count == 2: #LV Inverter
+            # Use grid type from register 184 Grid Type
+            if hasattr(inverter_data, 'grid_type'):
+                self.logger.info(f"Grid type read from inverter: 0x{inverter_data.grid_type:04X}")
+                if inverter_data.grid_type == 0x0000:
+                    sunspec_ac_type = 0 # SINGLE_PHASE
+                elif inverter_data.grid_type == 0x0001:
+                    sunspec_ac_type = 1 # SPLIT_PHASE
+                elif inverter_data.grid_type == 0x0002:
+                    sunspec_ac_type = 2 #THREE_PHASE
+        
+        elif phase_count == 3: #HV Inverter
+            # Use grid type from register 184 Grid Type
+            if hasattr(inverter_data, 'grid_type'):
+                self.logger.info(f"Grid type read from inverter: 0x{inverter_data.grid_type:04X}")
+                if inverter_data.grid_type == 0x0000:  # Three Phase (default)
+                    sunspec_ac_type = 2  # Three Phase
+                elif inverter_data.grid_type == 0x0001:  # Single Phase
+                    sunspec_ac_type = 0  # Single Phase
+                elif inverter_data.grid_type == 0x0002:  # Split Phase
+                    sunspec_ac_type = 1  # Split Phase
             else:
-                sunspec_ac_type = 3  # Three Phase Delta (fallback)
+                sunspec_ac_type = 2  # Default to Three Phase for 3-phase systems
         
         self._set_register(SunSpecRegisterMap.LOAD_AC_TYPE, sunspec_ac_type)
         
         # Operating state based on inverter status
         self._set_register(SunSpecRegisterMap.LOAD_OPERATING_STATE, 0xFFFF)
         
-        self._set_register(SunSpecRegisterMap.LOAD_STATUS, 0XFFFF)
+        self._set_register(SunSpecRegisterMap.LOAD_STATUS, 0xFFFF)
         
         # Grid connection state - same as Grid model
         self._set_register(SunSpecRegisterMap.LOAD_CONNECTION, 0xFFFF)
@@ -961,16 +1268,17 @@ class SunSpecMapper:
         # Power Factor (PF) - Load side power factor often not implemented
         self._set_register(SunSpecRegisterMap.LOAD_AC_PF, self.NULL_INT16)  # Not implemented
         
+        # Get inverter type string for phase-specific logic
+        inverter_type_str = getattr(inverter_data, 'get_inverter_type', lambda: self.inverter_type)()
+        
         # Current and voltage measurements
-        if phase_count == 2:
+        if 'split_phase' in inverter_type_str.lower() or 'single' in inverter_type_str.lower():
             # Split-phase calculations
             load_current_total = abs(inverter_data.load_current_l1 + inverter_data.load_current_l2)
-        elif phase_count == 3:
+        else:
             # 3-phase calculations
             load_current_total = abs(inverter_data.load_current_l1 + inverter_data.load_current_l2 +
                                    getattr(inverter_data, 'load_current_l3', 0))
-        else:
-            load_current_total = abs(inverter_data.load_current_l1)
         
         self._set_register(SunSpecRegisterMap.LOAD_AC_CURRENT, int(load_current_total * 100))  # Scale by 100
         # Using inverter voltage as approximation for load voltage
@@ -996,7 +1304,7 @@ class SunSpecMapper:
         self._set_register(SunSpecRegisterMap.LOAD_MODEL_BASE + 38, int(inverter_data.dcdc_xfrmr_temp * 10))  # Transformer temp
         
         # Phase-specific measurements
-        if phase_count == 2:
+        if 'split_phase' in inverter_type_str.lower() or 'single' in inverter_type_str.lower():
             # Split-phase L1 and L2 measurements
             self._set_register(SunSpecRegisterMap.LOAD_MODEL_BASE + 41, int(inverter_data.load_power_l1))  # WL1: Load L1 power
             self._set_register(SunSpecRegisterMap.LOAD_MODEL_BASE + 45, int(inverter_data.load_current_l1 * 100))  # Current L1
@@ -1007,7 +1315,7 @@ class SunSpecMapper:
             self._set_register(SunSpecRegisterMap.LOAD_MODEL_BASE + 68, int(inverter_data.load_current_l2 * 100))  # Current L2
             self._set_register(SunSpecRegisterMap.LOAD_MODEL_BASE + 70, int(getattr(inverter_data, 'inverter_voltage_l2n', 0) * 10))  # VL2: Load voltage L2
         
-        elif phase_count == 3:
+        else:
             # 3-phase L1, L2, and L3 measurements
             self._set_register(SunSpecRegisterMap.LOAD_MODEL_BASE + 41, int(inverter_data.load_power_l1))  # WL1: Load L1 power
             self._set_register(SunSpecRegisterMap.LOAD_MODEL_BASE + 45, int(inverter_data.load_current_l1 * 100))  # Current L1
@@ -1025,89 +1333,130 @@ class SunSpecMapper:
         
         # Vendor-specific status information
         if phase_count == 3:
-            alarm_info = f"Load Model - Power:{inverter_data.load_power_total:.0f}W L1:{inverter_data.load_power_l1:.0f}W L2:{inverter_data.load_power_l2:.0f}W L3:{getattr(inverter_data, 'load_power_l3', 0):.0f}W"
+            alarm_info = alarm_info = f"Kilroy was here"
         else:
-            alarm_info = f"Load Model - Power:{inverter_data.load_power_total:.0f}W L1:{inverter_data.load_power_l1:.0f}W L2:{inverter_data.load_power_l2:.0f}W"
+            alarm_info = alarm_info = f"Kilroy was here"
         self._set_string_registers(SunSpecRegisterMap.LOAD_MODEL_BASE + 123, alarm_info, 32)
     
     
     def _update_battery_registers(self):
-        """Update storage model registers """
-        # Calculate battery energy rating from capacity (Ah) and nominal voltage
-        battery_capacity_ah = self.battery_model.battery_capacity
-        nominal_voltage = 51.2  # Typical 48V LFP system, could be made configurable
+        """Update storage model (713) registers using correct Sol-Ark register mappings from CSV"""
+        # SunSpec Model 713 implementation based on CSV mapping
         
+        # Energy Rating (WHRtg) - from register 592 (Battery 1 Calculated Capacity)
+        # CSV notes: "In Ah, battery_capacity_ah * 409.6"
+        # Convert Ah to Wh using nominal voltage
+        if hasattr(self.battery_model, 'battery_calculated_capacity') and self.battery_model.battery_calculated_capacity > 0:
+            battery_capacity_ah = self.battery_model.battery_calculated_capacity
+        else:
+            battery_capacity_ah = self.battery_model.battery_capacity
+        
+        nominal_voltage = 51.2  # Typical 48V LFP system (409.6V / 8 cells = 51.2V per cell group)
         energy_rating = int(battery_capacity_ah * nominal_voltage)  # Wh = Ah * V
         self._set_register(SunSpecRegisterMap.STORAGE_ENERGY_RATING, energy_rating)
         
-        # Energy available (WHAvail = WHRtg * SoC * SoH)
-        # Using actual SOC from Sol-Ark and assuming 100% SoH if not available from BMS
-        soc = self.battery_model.battery_soc / 100.0
-        soh = 1.0  # Default to 100% if BMS data not available
+        # State of Charge (SoC) - from register 588 (Battery 1 SOC)
+        if hasattr(self.battery_model, 'battery_soc_713') and self.battery_model.battery_soc_713 > 0:
+            soc_percent = self.battery_model.battery_soc_713
+        else:
+            soc_percent = self.battery_model.battery_soc
         
-        energy_available = int(energy_rating * soc * soh)
+        # State of Health (SoH) - from register 10006 (Battery SOH)
+        if hasattr(self.battery_model, 'battery_soh') and self.battery_model.battery_soh > 0:
+            soh_percent = self.battery_model.battery_soh
+        else:
+            soh_percent = 100.0  # Default to 100% if not available
+        
+        # Energy Available (WHAvail = WHRtg * SoC * SoH)
+        soc_fraction = soc_percent / 100.0
+        soh_fraction = soh_percent / 100.0
+        energy_available = int(energy_rating * soc_fraction * soh_fraction)
         self._set_register(SunSpecRegisterMap.STORAGE_ENERGY_AVAILABLE, energy_available)
         
         # State of charge (%) - scaled by 10 for 0.1 scale factor
-        self._set_register(SunSpecRegisterMap.STORAGE_SOC, int(self.battery_model.battery_soc * 10))
+        self._set_register(SunSpecRegisterMap.STORAGE_SOC, int(soc_percent * 10))
         
-        # State of health (%) - default to 100% since Sol-Ark doesn't provide this directly
-        # In a real implementation, this could be calculated from battery degradation over time
-        self._set_register(SunSpecRegisterMap.STORAGE_SOH, 1000)  # 100.0% (scaled by 10)
+        # State of health (%) - scaled by 10 for 0.1 scale factor
+        self._set_register(SunSpecRegisterMap.STORAGE_SOH, int(soh_percent * 10))
         
         # Storage status - use the corrected enumerated values (0=OK, 1=Warning, 2=Error)
         self._set_register(SunSpecRegisterMap.STORAGE_STATUS, self.battery_model.battery_status)
         
         # Scale factors
-        self._set_register(SunSpecRegisterMap.STORAGE_SF_ENERGY, -3)  # Energy scale factor: -3 (0.001)
+        self._set_register(SunSpecRegisterMap.STORAGE_SF_ENERGY, 0)  # Energy scale factor: 0 (1) - values in Wh
         self._set_register(SunSpecRegisterMap.STORAGE_SF_PERCENT, -1)  # Percentage scale factor: -1 (0.1)
     
     def _update_dc_model_from_inverter(self, inverter_data):
-        """Update DC model (714) registers with inverter data (supports both split-phase and 3-phase)"""
+        """Update DC model (714) registers with inverter data using correct Model 714 fields"""
         try:
             phase_count = inverter_data.get_phase_count()
             
-            # Update DC model data from inverter registers
-            # PV Port 1
+            # Update DC model data from Model 714 register mappings
+            # PV Port 1 - from registers 676 (voltage), 677 (current), 672 (power)
             if hasattr(inverter_data, 'pv1_voltage') and hasattr(inverter_data, 'pv1_current') and hasattr(inverter_data, 'pv1_power'):
                 self.dc_model.ports[0].dc_voltage = inverter_data.pv1_voltage
                 self.dc_model.ports[0].dc_current = inverter_data.pv1_current
                 self.dc_model.ports[0].dc_power = inverter_data.pv1_power
                 self.dc_model.ports[0].dc_status = 1 if inverter_data.pv1_power > 10 else 0  # ON if power > 10W
-                self.dc_model.ports[0].temperature = inverter_data.igbt_temp if hasattr(inverter_data, 'igbt_temp') else 25.0
+                self.dc_model.ports[0].temperature = getattr(inverter_data, 'igbt_temp', 25.0)
             
-            # PV Port 2
+            # PV Port 2 - from registers 678 (voltage), 679 (current), 673 (power)
             if hasattr(inverter_data, 'pv2_voltage') and hasattr(inverter_data, 'pv2_current') and hasattr(inverter_data, 'pv2_power'):
                 self.dc_model.ports[1].dc_voltage = inverter_data.pv2_voltage
                 self.dc_model.ports[1].dc_current = inverter_data.pv2_current
                 self.dc_model.ports[1].dc_power = inverter_data.pv2_power
                 self.dc_model.ports[1].dc_status = 1 if inverter_data.pv2_power > 10 else 0  # ON if power > 10W
-                self.dc_model.ports[1].temperature = inverter_data.igbt_temp if hasattr(inverter_data, 'igbt_temp') else 25.0
+                self.dc_model.ports[1].temperature = getattr(inverter_data, 'igbt_temp', 25.0)
             
-            # PV Port 3 - available for both split-phase (compatibility) and 3-phase
+            # PV Port 3 - from registers 680 (voltage), 681 (current), 674 (power)
             if hasattr(inverter_data, 'pv3_voltage') and hasattr(inverter_data, 'pv3_current') and hasattr(inverter_data, 'pv3_power'):
                 self.dc_model.ports[2].dc_voltage = inverter_data.pv3_voltage
                 self.dc_model.ports[2].dc_current = inverter_data.pv3_current
                 self.dc_model.ports[2].dc_power = inverter_data.pv3_power
                 self.dc_model.ports[2].dc_status = 1 if inverter_data.pv3_power > 10 else 0  # ON if power > 10W
-                self.dc_model.ports[2].temperature = inverter_data.igbt_temp if hasattr(inverter_data, 'igbt_temp') else 25.0
+                self.dc_model.ports[2].temperature = getattr(inverter_data, 'igbt_temp', 25.0)
             
-            # PV Port 4 - Keep uninitialized as requested (for both split-phase and 3-phase)
-            # No updates for port 4 - it remains uninitialized
+            # PV Port 4 - from registers 682 (voltage), 683 (current), 675 (power) - Keep uninitialized
+            # No updates for port 4 - it remains uninitialized as requested
             
-            # ESS Port 1 - Battery measurements (same for both split-phase and 3-phase)
-            self.dc_model.ports[4].dc_voltage = inverter_data.battery_voltage
-            self.dc_model.ports[4].dc_current = inverter_data.battery_current
-            self.dc_model.ports[4].dc_power = inverter_data.battery_power
-            self.dc_model.ports[4].dc_status = 1 if abs(inverter_data.battery_power) > 10 else 0  # ON if power > 10W
-            self.dc_model.ports[4].temperature = inverter_data.battery_temperature
+            # ESS Port 1 - Battery measurements using Model 714 fields
+            # Use battery_1_* fields if available (from registers 587, 591, 590), otherwise fallback to legacy fields
+            if hasattr(inverter_data, 'battery_1_voltage') and hasattr(inverter_data, 'battery_1_current') and hasattr(inverter_data, 'battery_1_power'):
+                # Use Model 714 battery fields (registers 587, 591, 590)
+                self.dc_model.ports[4].dc_voltage = inverter_data.battery_1_voltage
+                self.dc_model.ports[4].dc_current = inverter_data.battery_1_current
+                self.dc_model.ports[4].dc_power = inverter_data.battery_1_power
+            else:
+                # Fallback to legacy battery fields for backward compatibility
+                self.dc_model.ports[4].dc_voltage = getattr(inverter_data, 'battery_voltage', 0.0)
+                self.dc_model.ports[4].dc_current = getattr(inverter_data, 'battery_current', 0.0)
+                self.dc_model.ports[4].dc_power = getattr(inverter_data, 'battery_power', 0.0)
+            
+            self.dc_model.ports[4].dc_status = 1 if abs(self.dc_model.ports[4].dc_power) > 10 else 0  # ON if power > 10W
+            self.dc_model.ports[4].temperature = getattr(inverter_data, 'battery_temperature', 25.0)
+            
+            # ESS Port 2 - Battery 2 measurements (only for 3-phase systems with 6 ports)
+            if self.dc_model.num_ports == 6 and len(self.dc_model.ports) > 5:
+                if hasattr(inverter_data, 'battery_2_voltage') and hasattr(inverter_data, 'battery_2_current') and hasattr(inverter_data, 'battery_2_power'):
+                    self.dc_model.ports[5].dc_voltage = inverter_data.battery_2_voltage
+                    self.dc_model.ports[5].dc_current = inverter_data.battery_2_current
+                    self.dc_model.ports[5].dc_power = inverter_data.battery_2_power
+                    self.dc_model.ports[5].dc_status = 1 if abs(inverter_data.battery_2_power) > 10 else 0  # ON if power > 10W
+                    self.dc_model.ports[5].temperature = getattr(inverter_data, 'battery_temperature', 25.0)
+                else:
+                    # Battery 2 not available - set to zero
+                    self.dc_model.ports[5].dc_voltage = 0.0
+                    self.dc_model.ports[5].dc_current = 0.0
+                    self.dc_model.ports[5].dc_power = 0.0
+                    self.dc_model.ports[5].dc_status = 0  # OFF
+                    self.dc_model.ports[5].temperature = 25.0
             
             # Calculate totals for all active ports (excluding port 4 which is uninitialized)
             total_current = 0.0
             total_power = 0.0
             
             for i, port in enumerate(self.dc_model.ports):
-                if i != 3:  # Skip port 4 (uninitialized)
+                if i != 3:  # Skip port 4 (PV4 - uninitialized)
                     total_current += abs(port.dc_current)
                     total_power += port.dc_power
             
@@ -1117,14 +1466,19 @@ class SunSpecMapper:
             # Update DC model registers
             self._update_dc_registers()
             
-            self.logger.debug(f"Updated SunSpec DC model (714) with {inverter_data.get_inverter_type()} data")
+            # Log debug info based on actual number of ports
+            if self.dc_model.num_ports == 6:
+                self.logger.debug(f"Updated SunSpec DC model (714) with {inverter_data.get_inverter_type()} data - "
+                                f"PV1:{self.dc_model.ports[0].dc_power:.0f}W PV2:{self.dc_model.ports[1].dc_power:.0f}W "
+                                f"PV3:{self.dc_model.ports[2].dc_power:.0f}W ESS1:{self.dc_model.ports[4].dc_power:.0f}W "
+                                f"ESS2:{self.dc_model.ports[5].dc_power:.0f}W")
+            else:
+                self.logger.debug(f"Updated SunSpec DC model (714) with {inverter_data.get_inverter_type()} data - "
+                                f"PV1:{self.dc_model.ports[0].dc_power:.0f}W PV2:{self.dc_model.ports[1].dc_power:.0f}W "
+                                f"PV3:{self.dc_model.ports[2].dc_power:.0f}W ESS1:{self.dc_model.ports[4].dc_power:.0f}W")
             
         except Exception as e:
             self.logger.error(f"Error updating DC model: {e}")
-    
-    def _update_dc_model_from_solark(self, solark_data):
-        """Legacy method for backward compatibility"""
-        self._update_dc_model_from_inverter(solark_data)
     
     def _update_dc_registers(self):
         """Update DC model (714) registers"""
@@ -1135,12 +1489,19 @@ class SunSpecMapper:
         # Update port alarms (none for now)
         self._set_register_32bit(SunSpecRegisterMap.DC_PORT_ALARMS, 0)
         
-        # Update individual port registers
+        # Update individual port registers dynamically based on actual number of ports
         port_bases = [SunSpecRegisterMap.DC_PORT1_BASE, SunSpecRegisterMap.DC_PORT2_BASE,
                      SunSpecRegisterMap.DC_PORT3_BASE, SunSpecRegisterMap.DC_PORT4_BASE,
                      SunSpecRegisterMap.DC_PORT5_BASE]
         
+        # Add 6th port base only if we have 6 ports (3-phase systems)
+        if self.dc_model.num_ports == 6:
+            port_bases.append(SunSpecRegisterMap.DC_PORT6_BASE)
+        
         for i, port_base in enumerate(port_bases):
+            if i >= len(self.dc_model.ports):
+                break  # Don't update ports that don't exist
+                
             port = self.dc_model.ports[i]
             
             # Skip port 4 (PV4) - keep it uninitialized

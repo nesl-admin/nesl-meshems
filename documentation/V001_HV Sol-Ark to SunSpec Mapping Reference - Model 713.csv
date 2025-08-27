@@ -1,0 +1,14 @@
+Address Offset,Group Offset,Name,Value,Count,Type,Size,Scale Factor,Units,RW Access (RW),Mandatory (M),Static (S),Label,Sol-Ark Register ID,Sol-Ark Register Desc,Notes
+,,DERStorageCapacity,,,group,,,,,,,DER Storage Capacity,,,
+0,,ID,713,,uint16,,,,,M,S,Model ID,,,
+1,,L,7,,uint16,,,,,M,S,Model Length,,,
+2,,WHRtg,,,uint16,,WH_SF,WH,,,,Energy Rating,592,Battery 1 Calculated Capacity,"In Ah, battery_capacity_ah * 409.6"
+3,,WHAvail,,,uint16,,WH_SF,WH,,,,Energy Available,,energy_rating * soc * soh,
+4,,SoC,,,uint16,,Pct_SF,Pct,,,,State of Charge,588,Battery 1 SOC,%
+5,,SoH,,,uint16,,Pct_SF,Pct,,,,State of Health,10006,Battery SOH,%
+6,,Sta,,,enum16,,,,,,,Status,,,
+,,OK,0,,,,,,,,,OK,,,
+,,WARNING,1,,,,,,,,,Warning,,,
+,,ERROR,2,,,,,,,,,Error,,,
+7,,WH_SF,,,sunssf,,,,,,S,Energy Scale Factor,,,
+8,,Pct_SF,,,sunssf,,,,,,S,Percent Scale Factor,,,

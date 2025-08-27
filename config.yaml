@@ -3,12 +3,12 @@
 
 # Inverter Configuration
 inverter:
-  #type: "solark_split_phase"  # Options: "solark_split_phase", "solark_3phase"
-  type: "solark_3phase"
+  type: "solark_split_phase"  # Options: "solark_split_phase", "solark_3phase"
+  #type: "solark_3phase"
   modbus_address: 1
   poll_interval: 1.0  # seconds
   max_retries: 3
-  retry_delay: 0.5  # seconds
+  retry_delay: 1  # seconds
 
 # Serial/RS485 Configuration
 serial:
@@ -50,10 +50,15 @@ data:
 
 # Device Information (for SunSpec Common Model)
 device_info:
-  manufacturer: "Ampra Grid"
-  model: "SOLARK-SUNSPEC GATEWAY"
-  version: "1.0"
-  serial_number: "JOULE-EMS-001"
+  manufacturer: "Ampra Grid Inc"
+  #LV Config
+  model: "LV-SA-GW" # Option for Low Voltage Modbus Map
+  version: "130" # Release Version of Low Voltage Modbus Map
+
+  #HV Config
+  #model: "HV-SA-GW" # Option for High Voltage Modbus Map
+  #version: "004" # Release Version of High Voltage Modbus Map
+  serial_number: "JOULE-EMS-0001"
   options: "Sol-Ark Gateway"
 
 # Monitoring and Alerts

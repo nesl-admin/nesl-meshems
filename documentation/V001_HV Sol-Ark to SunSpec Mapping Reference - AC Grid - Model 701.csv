@@ -1,0 +1,158 @@
+Address Offset,Name,Value,Type,Size,Scale Factor,Units,Mandatory (M),Label,Sol-Ark Register ID,Sol-Ark Register Desc,Notes
+,DERMeasureAC,,group,,,,,DER AC Measurement,,,
+0,ID,701,uint16,,,,M,Model ID,,,
+1,L,153,uint16,,,,M,Model Length,,,
+Wiring Type,,,,,,,,,,,
+2,ACType,,enum16,,,,M,AC Wiring Type,184,Grid Type,"0x0000: Three Phase (default value)
+0x0001: Single Phase
+0x0002: Split Phase"
+,SINGLE_PHASE,0,,,,,,Single Phase,,if 0x0001,
+,SPLIT_PHASE,1,,,,,,Split Phase,,if 0x0002,
+,THREE_PHASE,2,,,,,,Three Phase,,if 0x0000,
+Operating State,,,,,,,,,,,
+3,St,,enum16,,,,,Operating State,551,Power Button Status,"The lower 4 bits represent the switch signal
+0x0000: Power off
+0x0001: Power on"
+,OFF,0,,,,,,Off,,if 0x0000,
+,ON,1,,,,,,On,,if 0x0001,
+Inverter State,,,,,,,,,,,
+4,InvSt,,enum16,,,,,Inverter State,500,Operation Status,"0: Standby
+1: Self-test
+2: Normal
+3: Alarm
+4: Fault
+5: Activating"
+,OFF,0,,,,,,,,,
+,SLEEPING,1,,,,,,,,,
+,STARTING,2,,,,,,,,,
+,RUNNING,3,,,,,,,,,
+,THROTTLED,4,,,,,,,,,
+,SHUTTING_DOWN,5,,,,,,,,,
+,FAULT,6,,,,,,,,,
+,STANDBY,7,,,,,,,,,
+Grid Connection State,,,,,,,,,,,
+5,ConnSt,,enum16,,,,,Grid Connection State,552,AC Relay Status,"(0: off 1: on)
+Bit 0: INV relay
+Bit 1: Load relay 
+Bit 2: Grid relay
+Bit 3: Generator relay
+Bit 8: Gen two-wire start relay 
+"
+,DISCONNECTED,0,,,,,,Disconnected,,if Bit 2 = 0,
+,CONNECTED,1,,,,,,Connected,,if Bit 2 = 1,
+Alarms,,,,,,,,,,,
+6,Alrm,,bitfield32,,,,,Alarm Bitfield,,,
+,GROUND_FAULT,0,,,,,,Ground Fault,,,
+,DC_OVER_VOLT,1,,,,,,DC Over Voltage,,,
+,AC_DISCONNECT,2,,,,,,AC Disconnect Open,,,
+,DC_DISCONNECT,3,,,,,,DC Disconnect Open,,,
+,GRID_DISCONNECT,4,,,,,,Grid Disconnect,,,
+,CABINET_OPEN,5,,,,,,Cabinet Open,,,
+,MANUAL_SHUTDOWN,6,,,,,,Manual Shutdown,,,
+,OVER_TEMP,7,,,,,,Over Temperature,,,
+,OVER_FREQUENCY,8,,,,,,Frequency Above Limit,,,
+,UNDER_FREQUENCY,9,,,,,,Frequency Under Limit,,,
+,AC_OVER_VOLT,10,,,,,,AC Voltage Above Limit,,,
+,AC_UNDER_VOLT,11,,,,,,AC Voltage Under Limit,,,
+,BLOWN_STRING_FUSE,12,,,,,,Blown String Fuse On Input,,,
+,UNDER_TEMP,13,,,,,,Under Temperature,,,
+,MEMORY_LOSS,14,,,,,,Generic Memory Or Communication Error (Internal),,,
+,HW_TEST_FAILURE,15,,,,,,Hardware Test Failure,,,
+,MANUFACTURER_ALRM,16,,,,,,Manufacturer Alarm,,,
+8,DERMode,,bitfield32,,,,,DER Operational Characteristics,552,AC Relay Status,"(0: off 1: on)
+Bit 0: INV relay
+Bit 1: Load relay 
+Bit 2: Grid relay
+Bit 3: Generator relay
+Bit 8: Gen two-wire start relay 
+"
+,GRID_FOLLOWING,0,,,,,,Grid Following,if Bit 2 = 1,if Bit 2 = 1,
+,GRID_FORMING,1,,,,,,Grid Forming,if Bit 2 = 0,if Bit 2 = 0,
+,PV_CLIPPED,2,,,,,,PV Output Clipped,,,
+Summary,,,,,,,,,,,
+10,W,,int16,,W_SF,W,,Active Power,"690 Grid Side Total Power High Word, 625 Grid Side Total Power Low Word",,
+11,VA,,int16,,VA_SF,VA,,Apparent Power,"704 High Word, 608 Low Word","704 Grid Internal CT Total Apparent Power High Word, 608 Grid Internal CT Total Apparent Power Low Word",
+12,Var,,int16,,Var_SF,Var,,Reactive Power,"SUM(710,711,712)","Grid Phase A, B, C Reactive Power",
+13,PF,,int16,,PF_SF,,,Power Factor,621,Grid Power Factor,0.001
+14,A,,int16,,A_SF,A,,Total AC Current,"SUM(610, 611, 612)",,
+15,LLV,,uint16,,V_SF,V,,Voltage LL,Register 598 * 1.732,Grid Phase A Voltage * sqrt(3),0.1V
+16,LNV,,uint16,,V_SF,V,,Voltage LN,598,Grid Phase A Voltage,0.1V
+17,Hz,,uint32,,Hz_SF,Hz,,Frequency,609,Grid Frequency,0.01Hz
+19,TotWhInj,,uint64,,TotWh_SF,Wh,,Total Energy Injected,UNIMPLEMENTED,,
+23,TotWhAbs,,uint64,,TotWh_SF,Wh,,Total Energy Absorbed,UNIMPLEMENTED,,
+27,TotVarhInj,,uint64,,TotVarh_SF,Varh,,Total Reactive Energy Inj,UNIMPLEMENTED,,
+31,TotVarhAbs,,uint64,,TotVarh_SF,Varh,,Total Reactive Energy Abs,UNIMPLEMENTED,,
+Temperatures,,,,,,,,,,,
+35,TmpAmb,,int16,,Tmp_SF,C,,Ambient Temperature,UNIMPLEMENTED,,
+36,TmpCab,,int16,,Tmp_SF,C,,Cabinet Temperature,UNIMPLEMENTED,,
+37,TmpSnk,,int16,,Tmp_SF,C,,Heat Sink Temperature,541,Heat Sink Temperature,-100 °C offset (Ex.: 1250 → 25.0 °C)
+38,TmpTrns,,int16,,Tmp_SF,C,,Transformer Temperature,UNIMPLEMENTED,,
+39,TmpSw,,int16,,Tmp_SF,C,,IGBT/MOSFET Temperature,540,-100 °C offset (Ex.: 1250 → 25.0 °C),-100 °C offset (Ex.: 1250 → 25.0 °C)
+40,TmpOt,,int16,,Tmp_SF,C,,Other Temperature,UNIMPLEMENTED,,
+L1,,,,,,,,,,,
+41,WL1,,int16,,W_SF,W,,Watts L1,"622 Low Word, 687 High Word","622 Grid Side Phase A Power Low Word, 687, Grid Side Phase A Power High Word",32bit
+42,VAL1,,int16,,VA_SF,VA,,VA L1,UNIMPLEMENTED,,
+43,VarL1,,int16,,Var_SF,Var,,Var L1,710,Grid Phase A Reactive Power,10 VAR
+44,PFL1,,int16,,PF_SF,,,PF L1,UNIMPLEMENTED,,
+45,AL1,,int16,,A_SF,A,,Amps L1,610,Grid Internal CT Phase A Current,0.01A
+46,VL1L2,,uint16,,V_SF,V,,Phase Voltage L1-L2,Register 598 * 1.732,Grid Phase A Voltage * sqrt(3),0.1V
+47,VL1,,uint16,,V_SF,V,,Phase Voltage L1-N,598,Grid Phase A Voltage,0.1V
+48,TotWhInjL1,,uint64,,TotWh_SF,Wh,,Total Watt-Hours Inj L1,UNIMPLEMENTED,,
+52,TotWhAbsL1,,uint64,,TotWh_SF,Wh,,Total Watt-Hours Abs L1,UNIMPLEMENTED,,
+56,TotVarhInjL1,,uint64,,TotVarh_SF,Varh,,Total Var-Hours Inj L1,UNIMPLEMENTED,,
+60,TotVarhAbsL1,,uint64,,TotVarh_SF,Varh,,Total Var-Hours Abs L1,UNIMPLEMENTED,,
+L2,,,,,,,,,,,
+64,WL2,,int16,,W_SF,W,,Watts L2,"623 Low Word, 688 High Word","623 Grid Side Phase B Power Low Word, 688, Grid Side Phase B Power High Word",32bit
+65,VAL2,,int16,,VA_SF,VA,,VA L2,UNIMPLEMENTED,,
+66,VarL2,,int16,,Var_SF,Var,,Var L2,711,Grid Phase B Reactive Power,10 VAR
+67,PFL2,,int16,,PF_SF,,,PF L2,UNIMPLEMENTED,,
+68,AL2,,int16,,A_SF,A,,Amps L2,611,Grid Internal CT Phase B Current,0.01A
+69,VL2L3,,uint16,,V_SF,V,,Phase Voltage L2-L3,Register 599 * 1.732,Grid Phase B Voltage * sqrt(3),0.1V
+70,VL2,,uint16,,V_SF,V,,Phase Voltage L2-N,599,Grid Phase B Voltage,0.1V
+71,TotWhInjL2,,uint64,,TotWh_SF,Wh,,Total Watt-Hours Inj L2,UNIMPLEMENTED,,
+75,TotWhAbsL2,,uint64,,TotWh_SF,Wh,,Total Watt-Hours Abs L2,UNIMPLEMENTED,,
+79,TotVarhInjL2,,uint64,,TotVarh_SF,Varh,,Total Var-Hours Inj L2,UNIMPLEMENTED,,
+83,TotVarhAbsL2,,uint64,,TotVarh_SF,Varh,,Total Var-Hours Abs L2,UNIMPLEMENTED,,
+L3,,,,,,,,,,,
+87,WL3,,int16,,W_SF,W,,Watts L3,"624 Low Word, 689 High Word","624 Grid Side Phase C Power Low Word, 689, Grid Side Phase C Power High Word",32bit
+88,VAL3,,int16,,VA_SF,VA,,VA L3,UNIMPLEMENTED,,
+89,VarL3,,int16,,Var_SF,Var,,Var L3,712,Grid Phase C Reactive Power,10 VAR
+90,PFL3,,int16,,PF_SF,,,PF L3,UNIMPLEMENTED,,
+91,AL3,,int16,,A_SF,A,,Amps L3,612,Grid Internal CT Phase C Current,0.01A
+92,VL3L1,,uint16,,V_SF,V,,Phase Voltage L3-L1,Register 600 * 1.732,Grid Phase C Voltage * sqrt(3),0.1V
+93,VL3,,uint16,,V_SF,V,,Phase Voltage L3-N,600,Grid Phase C Voltage,0.1V
+94,TotWhInjL3,,uint64,,TotWh_SF,Wh,,Total Watt-Hours Inj L3,UNIMPLEMENTED,,
+98,TotWhAbsL3,,uint64,,TotWh_SF,Wh,,Total Watt-Hours Abs L3,UNIMPLEMENTED,,
+102,TotVarhInjL3,,uint64,,TotVarh_SF,Varh,,Total Var-Hours Inj L3,UNIMPLEMENTED,,
+106,TotVarhAbsL3,,uint64,,TotVarh_SF,Varh,,Total Var-Hours Abs L3,UNIMPLEMENTED,,
+Active Power Throttling,,,,,,,,,UNIMPLEMENTED,,
+110,ThrotPct,,uint16,,,Pct,,Throttling In Pct,,,
+111,ThrotSrc,,bitfield32,,,,,Throttle Source Information,,,
+,MAX_W,0,,,,,,,,,
+,FIXED_W,1,,,,,,,,,
+,FIXED_VAR,2,,,,,,,,,
+,FIXED_PF,3,,,,,,,,,
+,VOLT_VAR,4,,,,,,,,,
+,FREQ_WATT,5,,,,,,,,,
+,DYN_REACT_CURR,6,,,,,,,,,
+,LVRT,7,,,,,,,,,
+,HVRT,8,,,,,,,,,
+,WATT_VAR,9,,,,,,,,,
+,VOLT_WATT,10,,,,,,,,,
+,SCHEDULED,11,,,,,,,,,
+,LFRT,12,,,,,,,,,
+,HFRT,13,,,,,,,,,
+,DERATED,14,,,,,,,,,
+Scale Factors,,,,,,,,,,,
+113,A_SF,,sunssf,,,,,Current Scale Factor,,,
+114,V_SF,,sunssf,,,,,Voltage Scale Factor,,,
+115,Hz_SF,,sunssf,,,,,Frequency Scale Factor,,,
+116,W_SF,,sunssf,,,,,Active Power Scale Factor,,,
+117,PF_SF,,sunssf,,,,,Power Factor Scale Factor,,,
+118,VA_SF,,sunssf,,,,,Apparent Power Scale Factor,,,
+119,Var_SF,,sunssf,,,,,Reactive Power Scale Factor,,,
+120,TotWh_SF,,sunssf,,,,,Active Energy Scale Factor,,,
+121,TotVarh_SF,,sunssf,,,,,Reactive Energy Scale Factor,,,
+122,Tmp_SF,,sunssf,,,,,Temperature Scale Factor,,,
+Manufacturer Alarm Information,,,,,,,,,,,
+123,MnAlrmInfo,,string,32,,,,Manufacturer Alarm Info,,,

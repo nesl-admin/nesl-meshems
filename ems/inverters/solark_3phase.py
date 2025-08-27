@@ -87,6 +87,14 @@ class SolArk3PhaseClient(InverterClient):
             return value - 65536
         return value
     
+    def _combine_32bit(self, high_word: int, low_word: int) -> int:
+        """Combine high and low 16-bit words into a 32-bit signed value"""
+        combined = (high_word << 16) | low_word
+        # Convert to signed 32-bit if necessary
+        if combined > 2147483647:  # 2^31 - 1
+            combined -= 4294967296  # 2^32
+        return combined
+    
     def _read_holding_registers(self, start_register: int, num_registers: int) -> Optional[List[int]]:
         """Read holding registers from the device"""
         try:
@@ -110,245 +118,210 @@ class SolArk3PhaseClient(InverterClient):
             return None
     
     def _process_block(self, block: ModbusReadBlock, registers: List[int]):
-        """Process data from a read block"""
+        """Process data from a read block using correct Sol-Ark register mappings"""
         try:
-            if block.block_type == SolArk3PhaseBlockType.ENERGY:
-                # Registers 70-84 (15 regs) - same as split-phase
-                offset = SolArk3PhaseRegisterMap.BATTERY_CHARGE_ENERGY - block.start_register
-                self._data.battery_charge_energy = registers[offset] / SolArkScalingFactors.ENERGY
-                
-                offset = SolArk3PhaseRegisterMap.BATTERY_DISCHARGE_ENERGY - block.start_register
-                self._data.battery_discharge_energy = registers[offset] / SolArkScalingFactors.ENERGY
-                
-                offset = SolArk3PhaseRegisterMap.GRID_BUY_ENERGY - block.start_register
-                self._data.grid_buy_energy = registers[offset] / SolArkScalingFactors.ENERGY
-                
-                offset = SolArk3PhaseRegisterMap.GRID_SELL_ENERGY - block.start_register
-                self._data.grid_sell_energy = registers[offset] / SolArkScalingFactors.ENERGY
-                
-                offset = SolArk3PhaseRegisterMap.GRID_FREQUENCY - block.start_register
-                self._data.grid_frequency = registers[offset] / SolArkScalingFactors.FREQUENCY
-                
-                offset = SolArk3PhaseRegisterMap.LOAD_ENERGY - block.start_register
-                self._data.load_energy = registers[offset] / SolArkScalingFactors.ENERGY
-            
-            elif block.block_type == SolArk3PhaseBlockType.PV_ENERGY:
-                # Register 108 (1 reg) - same as split-phase
-                self._data.pv_energy = registers[0] / SolArkScalingFactors.ENERGY
+            if block.block_type == SolArk3PhaseBlockType.GRID_TYPE_286:
+                # Grid Type (AC Wiring Type) - Register 184
+                self._data.grid_type = registers[0]
             
             elif block.block_type == SolArk3PhaseBlockType.INVERTER_STATUS:
-                # Register 59 (1 reg) - same as split-phase
+                # Operation Status - Register 500
                 self._data.inverter_status = registers[0]
             
-            elif block.block_type == SolArk3PhaseBlockType.TEMPERATURES:
-                # Registers 90-91 (2 regs) - same as split-phase
-                offset = SolArk3PhaseRegisterMap.DCDC_XFRMR_TEMP - block.start_register
-                self._data.dcdc_xfrmr_temp = (registers[offset] - SolArkScalingFactors.TEMPERATURE_OFFSET) / SolArkScalingFactors.TEMPERATURE_SCALE
-                
-                offset = SolArk3PhaseRegisterMap.IGBT_HEATSINK_TEMP - block.start_register
-                self._data.igbt_temp = (registers[offset] - SolArkScalingFactors.TEMPERATURE_OFFSET) / SolArkScalingFactors.TEMPERATURE_SCALE
-            
-            elif block.block_type == SolArk3PhaseBlockType.APPARENT_POWER_38:
-                # Register 38 (1 reg) - same as split-phase
-                self._data.apparent_power = registers[0]
-            
-            elif block.block_type == SolArk3PhaseBlockType.GRID_POWER_FACTOR_89:
-                # Register 89 (1 reg) - same as split-phase
-                self._data.grid_power_factor = registers[0] / SolArkScalingFactors.CURRENT  # Power factor is scaled by 100
+            elif block.block_type == SolArk3PhaseBlockType.BATTERY_STATUS_190:
+                # Power Button Status - Register 551
+                self._data.power_button_status = registers[0]
             
             elif block.block_type == SolArk3PhaseBlockType.GRID_INVERTER_150:
-                # Registers 150-174 (25 regs) - extended for 3-phase
-                # Grid voltage registers (3-phase)
-                offset = SolArk3PhaseRegisterMap.GRID_VOLTAGE_L1N - block.start_register
-                self._data.grid_voltage_l1n = registers[offset] / SolArkScalingFactors.VOLTAGE
+                # AC Relay Status - Register 552
+                self._data.grid_relay_status = registers[0]
+            
+            elif block.block_type == SolArk3PhaseBlockType.GRID_3PHASE_VOLTAGES:
+                # Grid Phase Voltages - Registers 598-600 (L1N, L2N, L3N)
+                self._data.grid_voltage_l1n = registers[0] / SolArkScalingFactors.VOLTAGE  # 0.1V scale
+                self._data.grid_voltage_l2n = registers[1] / SolArkScalingFactors.VOLTAGE  # 0.1V scale
+                self._data.grid_voltage_l3n = registers[2] / SolArkScalingFactors.VOLTAGE  # 0.1V scale
                 
-                offset = SolArk3PhaseRegisterMap.GRID_VOLTAGE_L2N - block.start_register
-                self._data.grid_voltage_l2n = registers[offset] / SolArkScalingFactors.VOLTAGE
-                
-                offset = SolArk3PhaseRegisterMap.GRID_VOLTAGE_L3N - block.start_register
-                self._data.grid_voltage_l3n = registers[offset] / SolArkScalingFactors.VOLTAGE
-                
-                offset = SolArk3PhaseRegisterMap.GRID_VOLTAGE_L1L2 - block.start_register
-                self._data.grid_voltage_l1l2 = registers[offset] / SolArkScalingFactors.VOLTAGE
-                
-                offset = SolArk3PhaseRegisterMap.GRID_VOLTAGE_L2L3 - block.start_register
-                self._data.grid_voltage_l2l3 = registers[offset] / SolArkScalingFactors.VOLTAGE
-                
-                offset = SolArk3PhaseRegisterMap.GRID_VOLTAGE_L3L1 - block.start_register
-                self._data.grid_voltage_l3l1 = registers[offset] / SolArkScalingFactors.VOLTAGE
+                # Calculate line-to-line voltages (L-L = L-N * sqrt(3))
+                self._data.grid_voltage_l1l2 = self._data.grid_voltage_l1n * 1.732
+                self._data.grid_voltage_l2l3 = self._data.grid_voltage_l2n * 1.732
+                self._data.grid_voltage_l3l1 = self._data.grid_voltage_l3n * 1.732
                 
                 # Legacy grid_voltage for backward compatibility - use L1L2 voltage
                 self._data.grid_voltage = self._data.grid_voltage_l1l2
+            
+            elif block.block_type == SolArk3PhaseBlockType.ENERGY:
+                # Grid Frequency - Register 609
+                self._data.grid_frequency = registers[0] / SolArkScalingFactors.FREQUENCY  # 0.01Hz scale
+            
+            elif block.block_type == SolArk3PhaseBlockType.GRID_3PHASE_CURRENTS:
+                # Grid CT Currents - Registers 610-612 (L1, L2, L3)
+                self._data.grid_ct_current_l1 = registers[0] / SolArkScalingFactors.CURRENT  # 0.01A scale
+                self._data.grid_ct_current_l2 = registers[1] / SolArkScalingFactors.CURRENT  # 0.01A scale
+                self._data.grid_ct_current_l3 = registers[2] / SolArkScalingFactors.CURRENT  # 0.01A scale
                 
-                # Inverter voltage registers (3-phase)
-                offset = SolArk3PhaseRegisterMap.INVERTER_VOLTAGE_L1N - block.start_register
-                self._data.inverter_voltage_l1n = registers[offset] / SolArkScalingFactors.VOLTAGE
-                
-                offset = SolArk3PhaseRegisterMap.INVERTER_VOLTAGE_L2N - block.start_register
-                self._data.inverter_voltage_l2n = registers[offset] / SolArkScalingFactors.VOLTAGE
-                
-                offset = SolArk3PhaseRegisterMap.INVERTER_VOLTAGE_L3N - block.start_register
-                self._data.inverter_voltage_l3n = registers[offset] / SolArkScalingFactors.VOLTAGE
-                
-                offset = SolArk3PhaseRegisterMap.INVERTER_VOLTAGE_L1L2 - block.start_register
-                self._data.inverter_voltage_l1l2 = registers[offset] / SolArkScalingFactors.VOLTAGE
-                
-                offset = SolArk3PhaseRegisterMap.INVERTER_VOLTAGE_L2L3 - block.start_register
-                self._data.inverter_voltage_l2l3 = registers[offset] / SolArkScalingFactors.VOLTAGE
-                
-                offset = SolArk3PhaseRegisterMap.INVERTER_VOLTAGE_L3L1 - block.start_register
-                self._data.inverter_voltage_l3l1 = registers[offset] / SolArkScalingFactors.VOLTAGE
-                
-                # Legacy inverter_voltage for backward compatibility - use L1L2 voltage
-                self._data.inverter_voltage = self._data.inverter_voltage_l1l2
-                self._data.inverter_voltage_ln = self._data.inverter_voltage_l1n  # Legacy compatibility
-                
-                # Grid current registers (3-phase)
-                offset = SolArk3PhaseRegisterMap.GRID_CURRENT_L1 - block.start_register
-                self._data.grid_current_l1 = registers[offset] / SolArkScalingFactors.CURRENT
-                
-                offset = SolArk3PhaseRegisterMap.GRID_CURRENT_L2 - block.start_register
-                self._data.grid_current_l2 = registers[offset] / SolArkScalingFactors.CURRENT
-                
-                offset = SolArk3PhaseRegisterMap.GRID_CURRENT_L3 - block.start_register
-                self._data.grid_current_l3 = registers[offset] / SolArkScalingFactors.CURRENT
-                
-                # Grid CT current registers (3-phase)
-                offset = SolArk3PhaseRegisterMap.GRID_CT_CURRENT_L1 - block.start_register
-                self._data.grid_ct_current_l1 = registers[offset] / SolArkScalingFactors.CURRENT
-                
-                offset = SolArk3PhaseRegisterMap.GRID_CT_CURRENT_L2 - block.start_register
-                self._data.grid_ct_current_l2 = registers[offset] / SolArkScalingFactors.CURRENT
-                
-                offset = SolArk3PhaseRegisterMap.GRID_CT_CURRENT_L3 - block.start_register
-                self._data.grid_ct_current_l3 = registers[offset] / SolArkScalingFactors.CURRENT
-                
-                # Inverter current registers (3-phase)
-                offset = SolArk3PhaseRegisterMap.INVERTER_CURRENT_L1 - block.start_register
-                self._data.inverter_current_l1 = registers[offset] / SolArkScalingFactors.CURRENT
-                
-                offset = SolArk3PhaseRegisterMap.INVERTER_CURRENT_L2 - block.start_register
-                self._data.inverter_current_l2 = registers[offset] / SolArkScalingFactors.CURRENT
-                
-                offset = SolArk3PhaseRegisterMap.INVERTER_CURRENT_L3 - block.start_register
-                self._data.inverter_current_l3 = registers[offset] / SolArkScalingFactors.CURRENT
-                
-                offset = SolArk3PhaseRegisterMap.SMART_LOAD_POWER - block.start_register
-                self._data.smart_load_power = registers[offset]
-                
-                offset = SolArk3PhaseRegisterMap.GRID_POWER - block.start_register
-                self._data.grid_power = self._correct_signed_value(registers[offset])
+                # Set legacy grid current values for compatibility
+                self._data.grid_current_l1 = self._data.grid_ct_current_l1
+                self._data.grid_current_l2 = self._data.grid_ct_current_l2
+                self._data.grid_current_l3 = self._data.grid_ct_current_l3
+            
+            elif block.block_type == SolArk3PhaseBlockType.GRID_POWER_FACTOR_89:
+                # Grid Power Factor - Register 621 (signed 16-bit integer)
+                signed_value = self._correct_signed_value(registers[0])
+                self._data.grid_power_factor = signed_value / 1000.0  # 0.001 scale factor
             
             elif block.block_type == SolArk3PhaseBlockType.POWER_BATTERY_170:
-                # Registers 170-194 (25 regs) - extended for 3-phase
-                offset = SolArk3PhaseRegisterMap.INVERTER_OUTPUT_POWER - block.start_register
-                self._data.inverter_output_power = self._correct_signed_value(registers[offset])
-                
-                # Load power (3-phase)
-                offset = SolArk3PhaseRegisterMap.LOAD_POWER_L1 - block.start_register
-                self._data.load_power_l1 = registers[offset]
-                
-                offset = SolArk3PhaseRegisterMap.LOAD_POWER_L2 - block.start_register
-                self._data.load_power_l2 = registers[offset]
-                
-                offset = SolArk3PhaseRegisterMap.LOAD_POWER_L3 - block.start_register
-                self._data.load_power_l3 = registers[offset]
-                
-                self._data.load_power_total = self._data.load_power_l1 + self._data.load_power_l2 + self._data.load_power_l3
-                
-                # Load current (3-phase)
-                offset = SolArk3PhaseRegisterMap.LOAD_CURRENT_L1 - block.start_register
-                self._data.load_current_l1 = registers[offset] / SolArkScalingFactors.CURRENT
-                
-                offset = SolArk3PhaseRegisterMap.LOAD_CURRENT_L2 - block.start_register
-                self._data.load_current_l2 = registers[offset] / SolArkScalingFactors.CURRENT
-                
-                offset = SolArk3PhaseRegisterMap.LOAD_CURRENT_L3 - block.start_register
-                self._data.load_current_l3 = registers[offset] / SolArkScalingFactors.CURRENT
-                
-                # Battery measurements (same as split-phase)
-                offset = SolArk3PhaseRegisterMap.BATTERY_TEMPERATURE - block.start_register
-                self._data.battery_temperature = (registers[offset] - SolArkScalingFactors.TEMPERATURE_OFFSET) / SolArkScalingFactors.TEMPERATURE_SCALE
-                
-                offset = SolArk3PhaseRegisterMap.BATTERY_VOLTAGE - block.start_register
-                self._data.battery_voltage = registers[offset] / SolArkScalingFactors.CURRENT
-                
-                offset = SolArk3PhaseRegisterMap.BATTERY_SOC - block.start_register
-                self._data.battery_soc = registers[offset]
-                
-                # PV measurements (3 MPPT for 3-phase)
-                offset = SolArk3PhaseRegisterMap.PV1_POWER - block.start_register
-                self._data.pv1_power = registers[offset]
-                
-                offset = SolArk3PhaseRegisterMap.PV2_POWER - block.start_register
-                self._data.pv2_power = registers[offset]
-                
-                offset = SolArk3PhaseRegisterMap.PV3_POWER - block.start_register
-                self._data.pv3_power = registers[offset]
-                
-                # Inverter power (3-phase)
-                offset = SolArk3PhaseRegisterMap.INVERTER_POWER_L1 - block.start_register
-                self._data.inverter_power_l1 = registers[offset]
-                
-                offset = SolArk3PhaseRegisterMap.INVERTER_POWER_L2 - block.start_register
-                self._data.inverter_power_l2 = registers[offset]
-                
-                offset = SolArk3PhaseRegisterMap.INVERTER_POWER_L3 - block.start_register
-                self._data.inverter_power_l3 = registers[offset]
-                
-                self._data.pv_power_total = (self._data.pv1_power + self._data.pv2_power + self._data.pv3_power) / 1000.0
+                # Grid Power Low Words - Registers 622-624 (L1, L2, L3)
+                self._grid_power_l1_low = registers[0]
+                self._grid_power_l2_low = registers[1]
+                self._grid_power_l3_low = registers[2]
             
-            elif block.block_type == SolArk3PhaseBlockType.BATTERY_STATUS_190:
-                # Registers 190-199 (10 regs) - same as split-phase
-                offset = SolArk3PhaseRegisterMap.BATTERY_POWER - block.start_register
-                self._data.battery_power = self._correct_signed_value(registers[offset])
-                
-                offset = SolArk3PhaseRegisterMap.BATTERY_CURRENT - block.start_register
-                self._data.battery_current = self._correct_signed_value(registers[offset]) / SolArkScalingFactors.CURRENT
-                
-                offset = SolArk3PhaseRegisterMap.LOAD_FREQUENCY - block.start_register
-                self._data.load_frequency = registers[offset] / SolArkScalingFactors.FREQUENCY
-                
-                offset = SolArk3PhaseRegisterMap.INVERTER_FREQUENCY - block.start_register
-                self._data.inverter_frequency = registers[offset] / SolArkScalingFactors.FREQUENCY
-                
-                offset = SolArk3PhaseRegisterMap.GRID_RELAY_STATUS - block.start_register
-                self._data.grid_relay_status = registers[offset]
-                
-                offset = SolArk3PhaseRegisterMap.GENERATOR_RELAY_STATUS - block.start_register
-                self._data.generator_relay_status = registers[offset]
+            elif block.block_type == SolArk3PhaseBlockType.APPARENT_POWER_38:
+                # Grid Total Power Low - Register 625
+                self._grid_total_power_low = registers[0]
             
-            elif block.block_type == SolArk3PhaseBlockType.PV_3PHASE_MEASUREMENTS:
-                # Registers 109-114 (6 regs) - PV voltage and current measurements
-                offset = SolArk3PhaseRegisterMap.PV1_VOLTAGE - block.start_register
-                self._data.pv1_voltage = registers[offset] / SolArkScalingFactors.VOLTAGE
+            elif block.block_type == SolArk3PhaseBlockType.LOAD_3PHASE_MEASUREMENTS:
+                # Grid Power High Words - Registers 687-690 (L1, L2, L3, Total)
+                grid_power_l1_high = registers[0]
+                grid_power_l2_high = registers[1]
+                grid_power_l3_high = registers[2]
+                grid_total_power_high = registers[3]
                 
-                offset = SolArk3PhaseRegisterMap.PV1_CURRENT - block.start_register
-                self._data.pv1_current = registers[offset] / SolArkScalingFactors.CURRENT
-                
-                offset = SolArk3PhaseRegisterMap.PV2_VOLTAGE - block.start_register
-                self._data.pv2_voltage = registers[offset] / SolArkScalingFactors.VOLTAGE
-                
-                offset = SolArk3PhaseRegisterMap.PV2_CURRENT - block.start_register
-                self._data.pv2_current = registers[offset] / SolArkScalingFactors.CURRENT
-                
-                offset = SolArk3PhaseRegisterMap.PV3_VOLTAGE - block.start_register
-                self._data.pv3_voltage = registers[offset] / SolArkScalingFactors.VOLTAGE
-                
-                offset = SolArk3PhaseRegisterMap.PV3_CURRENT - block.start_register
-                self._data.pv3_current = registers[offset] / SolArkScalingFactors.CURRENT
-            
-            # Handle remaining block types same as split-phase
-            elif block.block_type == SolArk3PhaseBlockType.BATTERY_CAPACITY_204:
-                self._data.battery_capacity = registers[0]
+                # Combine high and low words to get 32-bit power values
+                if hasattr(self, '_grid_power_l1_low'):
+                    self._data.grid_power_l1 = self._combine_32bit(grid_power_l1_high, self._grid_power_l1_low)
+                if hasattr(self, '_grid_power_l2_low'):
+                    self._data.grid_power_l2 = self._combine_32bit(grid_power_l2_high, self._grid_power_l2_low)
+                if hasattr(self, '_grid_power_l3_low'):
+                    self._data.grid_power_l3 = self._combine_32bit(grid_power_l3_high, self._grid_power_l3_low)
+                if hasattr(self, '_grid_total_power_low'):
+                    self._data.grid_power = self._combine_32bit(grid_total_power_high, self._grid_total_power_low)
             
             elif block.block_type == SolArk3PhaseBlockType.CORRECTED_BATTERY_CAPACITY_107:
-                self._data.corrected_battery_capacity = registers[0]
+                # Grid Apparent Power Low - Register 608
+                self._grid_apparent_power_low = registers[0]
+            
+            elif block.block_type == SolArk3PhaseBlockType.BATTERY_CAPACITY_204:
+                # Grid Apparent Power High - Register 704
+                if hasattr(self, '_grid_apparent_power_low'):
+                    self._data.apparent_power = self._combine_32bit(registers[0], self._grid_apparent_power_low)
+            
+            elif block.block_type == SolArk3PhaseBlockType.INVERTER_3PHASE_CURRENTS:
+                # Grid Reactive Power - Registers 710-712 (L1, L2, L3)
+                self._data.grid_reactive_power_l1 = registers[0] * 10  # 10 VAR scale
+                self._data.grid_reactive_power_l2 = registers[1] * 10  # 10 VAR scale
+                self._data.grid_reactive_power_l3 = registers[2] * 10  # 10 VAR scale
+                
+                # Calculate total reactive power
+                self._data.grid_reactive_power_total = (self._data.grid_reactive_power_l1 +
+                                                       self._data.grid_reactive_power_l2 +
+                                                       self._data.grid_reactive_power_l3)
+            
+            elif block.block_type == SolArk3PhaseBlockType.TEMPERATURES:
+                # Temperature measurements - Registers 540-541 (IGBT, Heat Sink)
+                self._data.igbt_temp = (registers[0] - SolArkScalingFactors.TEMPERATURE_OFFSET) / SolArkScalingFactors.TEMPERATURE_SCALE
+                self._data.dcdc_xfrmr_temp = (registers[1] - SolArkScalingFactors.TEMPERATURE_OFFSET) / SolArkScalingFactors.TEMPERATURE_SCALE
+            
+            elif block.block_type == SolArk3PhaseBlockType.PV_3PHASE_MEASUREMENTS:
+                # PV measurements - Registers 109-114 (PV1-3 voltage and current)
+                self._data.pv1_voltage = registers[0] / SolArkScalingFactors.VOLTAGE
+                self._data.pv1_current = registers[1] / SolArkScalingFactors.CURRENT
+                self._data.pv2_voltage = registers[2] / SolArkScalingFactors.VOLTAGE
+                self._data.pv2_current = registers[3] / SolArkScalingFactors.CURRENT
+                self._data.pv3_voltage = registers[4] / SolArkScalingFactors.VOLTAGE
+                self._data.pv3_current = registers[5] / SolArkScalingFactors.CURRENT
+                
+                # Calculate PV power
+                self._data.pv1_power = self._data.pv1_voltage * self._data.pv1_current
+                self._data.pv2_power = self._data.pv2_voltage * self._data.pv2_current
+                self._data.pv3_power = self._data.pv3_voltage * self._data.pv3_current
+                self._data.pv_power_total = (self._data.pv1_power + self._data.pv2_power + self._data.pv3_power) / 1000.0
+            
+            # SunSpec Model 713 (DER Storage Capacity) blocks
+            elif block.block_type == SolArk3PhaseBlockType.MODEL_713_BATTERY_CAPACITY:
+                # Battery Calculated Capacity - Register 592 (Ah)
+                # Note: CSV says "In Ah, battery_capacity_ah * 409.6"
+                self._data.battery_calculated_capacity = registers[0]  # Already in Ah
+            
+            elif block.block_type == SolArk3PhaseBlockType.MODEL_713_BATTERY_SOC:
+                # Battery SOC - Register 588 (%)
+                self._data.battery_soc_713 = registers[0]
+            
+            elif block.block_type == SolArk3PhaseBlockType.MODEL_713_BATTERY_SOH:
+                # Battery SOH - Register 10006 (%)
+                self._data.battery_soh = registers[0]
+            
+            # SunSpec Model 714 (DER DC Measurement) blocks
+            elif block.block_type == SolArk3PhaseBlockType.MODEL_714_PV1_MEASUREMENTS:
+                if block.start_register == SolArk3PhaseRegisterMap.PV1_POWER:
+                    # PV1 Power - Register 672
+                    self._data.pv1_power = registers[0]
+                elif block.start_register == SolArk3PhaseRegisterMap.PV1_VOLTAGE:
+                    # PV1 Voltage/Current - Registers 676-677
+                    self._data.pv1_voltage = registers[0] / SolArkScalingFactors.VOLTAGE
+                    self._data.pv1_current = registers[1] / SolArkScalingFactors.CURRENT
+            
+            elif block.block_type == SolArk3PhaseBlockType.MODEL_714_PV2_MEASUREMENTS:
+                if block.start_register == SolArk3PhaseRegisterMap.PV2_POWER:
+                    # PV2 Power - Register 673
+                    self._data.pv2_power = registers[0]
+                elif block.start_register == SolArk3PhaseRegisterMap.PV2_VOLTAGE:
+                    # PV2 Voltage/Current - Registers 678-679
+                    self._data.pv2_voltage = registers[0] / SolArkScalingFactors.VOLTAGE
+                    self._data.pv2_current = registers[1] / SolArkScalingFactors.CURRENT
+            
+            elif block.block_type == SolArk3PhaseBlockType.MODEL_714_PV3_MEASUREMENTS:
+                if block.start_register == SolArk3PhaseRegisterMap.PV3_POWER:
+                    # PV3 Power - Register 674
+                    self._data.pv3_power = registers[0]
+                elif block.start_register == SolArk3PhaseRegisterMap.PV3_VOLTAGE:
+                    # PV3 Voltage/Current - Registers 680-681
+                    self._data.pv3_voltage = registers[0] / SolArkScalingFactors.VOLTAGE
+                    self._data.pv3_current = registers[1] / SolArkScalingFactors.CURRENT
+            
+            elif block.block_type == SolArk3PhaseBlockType.MODEL_714_PV4_MEASUREMENTS:
+                if block.start_register == SolArk3PhaseRegisterMap.PV4_POWER:
+                    # PV4 Power - Register 675
+                    self._data.pv4_power = registers[0]
+                elif block.start_register == SolArk3PhaseRegisterMap.PV4_VOLTAGE:
+                    # PV4 Voltage/Current - Registers 682-683
+                    self._data.pv4_voltage = registers[0] / SolArkScalingFactors.VOLTAGE
+                    self._data.pv4_current = registers[1] / SolArkScalingFactors.CURRENT
+            
+            elif block.block_type == SolArk3PhaseBlockType.MODEL_714_BATTERY1_MEASUREMENTS:
+                if block.start_register == SolArk3PhaseRegisterMap.BATTERY_1_VOLTAGE:
+                    # Battery 1 Voltage - Register 587
+                    self._data.battery_1_voltage = registers[0] / SolArkScalingFactors.VOLTAGE
+                elif block.start_register == SolArk3PhaseRegisterMap.BATTERY_1_POWER:
+                    # Battery 1 Power/Current - Registers 590-591
+                    self._data.battery_1_power = self._correct_signed_value(registers[0])  # int16
+                    self._data.battery_1_current = self._correct_signed_value(registers[1]) / SolArkScalingFactors.CURRENT  # int16
+            
+            elif block.block_type == SolArk3PhaseBlockType.MODEL_714_BATTERY2_MEASUREMENTS:
+                if block.start_register == SolArk3PhaseRegisterMap.BATTERY_2_VOLTAGE:
+                    # Battery 2 Voltage - Register 593
+                    self._data.battery_2_voltage = registers[0] / SolArkScalingFactors.VOLTAGE
+                elif block.start_register == SolArk3PhaseRegisterMap.BATTERY_2_CURRENT:
+                    # Battery 2 Current/Power - Registers 594-595
+                    self._data.battery_2_current = self._correct_signed_value(registers[0]) / SolArkScalingFactors.CURRENT  # int16
+                    self._data.battery_2_power = self._correct_signed_value(registers[1])  # int16
+            
+            # Update total PV power to include PV4
+            if hasattr(self._data, 'pv4_power'):
+                self._data.pv_power_total = (self._data.pv1_power + self._data.pv2_power +
+                                           self._data.pv3_power + self._data.pv4_power) / 1000.0
+            
+            # Legacy blocks for compatibility (using existing register definitions)
+            elif block.block_type == SolArk3PhaseBlockType.PV_ENERGY:
+                # PV Energy - Register 108
+                self._data.pv_energy = registers[0] / SolArkScalingFactors.ENERGY
             
             elif block.block_type == SolArk3PhaseBlockType.BATTERY_EMPTY_VOLTAGE_205:
+                # Battery Empty Voltage - Register 205
                 self._data.battery_empty_voltage = registers[0] / SolArkScalingFactors.CURRENT
             
             elif block.block_type == SolArk3PhaseBlockType.BATTERY_VOLTAGE_THRESHOLDS_220:
+                # Battery Voltage Thresholds - Registers 220-222
                 offset = SolArk3PhaseRegisterMap.BATTERY_SHUTDOWN_VOLTAGE - block.start_register
                 self._data.battery_shutdown_voltage = registers[offset] / SolArkScalingFactors.CURRENT
                 
@@ -359,6 +332,7 @@ class SolArk3PhaseClient(InverterClient):
                 self._data.battery_low_voltage = registers[offset] / SolArkScalingFactors.CURRENT
             
             elif block.block_type == SolArk3PhaseBlockType.BATTERY_PERCENT_THRESHOLDS_217:
+                # Battery Percent Thresholds - Registers 217-219
                 offset = SolArk3PhaseRegisterMap.BATTERY_SHUTDOWN_PERCENT - block.start_register
                 self._data.battery_shutdown_percent = registers[offset]
                 
@@ -369,6 +343,7 @@ class SolArk3PhaseClient(InverterClient):
                 self._data.battery_low_percent = registers[offset]
             
             elif block.block_type == SolArk3PhaseBlockType.BMS_DATA_312:
+                # BMS Data - Registers 312-323
                 offset = SolArk3PhaseRegisterMap.BMS_CHARGING_VOLTAGE - block.start_register
                 self._data.bms_charging_voltage = registers[offset] / SolArkScalingFactors.CURRENT
                 
@@ -399,10 +374,8 @@ class SolArk3PhaseClient(InverterClient):
                 offset = SolArk3PhaseRegisterMap.BMS_FAULT - block.start_register
                 self._data.bms_fault = registers[offset]
             
-            elif block.block_type == SolArk3PhaseBlockType.GRID_TYPE_286:
-                self._data.grid_type = registers[0]
-            
             elif block.block_type == SolArk3PhaseBlockType.DIAGNOSTICS:
+                # Diagnostics - Registers 2-7
                 offset = SolArk3PhaseRegisterMap.COMM_VERSION - block.start_register
                 self._data.comm_version = registers[offset]
                 
