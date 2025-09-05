@@ -920,7 +920,7 @@ class SunSpecMapper:
         if phase_count == 2: #LV Inverter
             # Use grid type from register 184 Grid Type
             if hasattr(inverter_data, 'grid_type'):
-                self.logger.info(f"Grid type read from inverter: 0x{inverter_data.grid_type:04X}")
+                self.logger.debug(f"LV | Grid type read from inverter: 0x{inverter_data.grid_type:04X}")
                 if inverter_data.grid_type == 0x0000:
                     sunspec_ac_type = 0 # SINGLE_PHASE
                 elif inverter_data.grid_type == 0x0001:
@@ -931,7 +931,7 @@ class SunSpecMapper:
         elif phase_count == 3: #HV Inverter
             # Use grid type from register 184 Grid Type
             if hasattr(inverter_data, 'grid_type'):
-                self.logger.info(f"Grid type read from inverter: 0x{inverter_data.grid_type:04X}")
+                self.logger.debug(f"HV 3P | Grid type read from inverter: 0x{inverter_data.grid_type:04X}")
                 if inverter_data.grid_type == 0x0000:  # Three Phase (default)
                     sunspec_ac_type = 2  # Three Phase
                 elif inverter_data.grid_type == 0x0001:  # Single Phase
@@ -947,7 +947,7 @@ class SunSpecMapper:
         # SunSpec Operating State - Offset (3) - from CSV register 551 (Power Button Status)
         operating_state = 1  # Default to ON
         if hasattr(inverter_data, 'power_button_status'):
-            self.logger.info(f"Power Button status from inverter: 0x{inverter_data.power_button_status:04X}")
+            self.logger.debug(f"Power Button status from inverter: 0x{inverter_data.power_button_status:04X}")
             operating_state = 1 if inverter_data.power_button_status == 1 else 0
 
         self._set_register(SunSpecRegisterMap.GRID_OPERATING_STATE, operating_state)
@@ -1200,7 +1200,7 @@ class SunSpecMapper:
         if phase_count == 2: #LV Inverter
             # Use grid type from register 184 Grid Type
             if hasattr(inverter_data, 'grid_type'):
-                self.logger.info(f"Grid type read from inverter: 0x{inverter_data.grid_type:04X}")
+                self.logger.debug(f"LV | Grid type read from inverter: 0x{inverter_data.grid_type:04X}")
                 if inverter_data.grid_type == 0x0000:
                     sunspec_ac_type = 0 # SINGLE_PHASE
                 elif inverter_data.grid_type == 0x0001:
@@ -1211,7 +1211,7 @@ class SunSpecMapper:
         elif phase_count == 3: #HV Inverter
             # Use grid type from register 184 Grid Type
             if hasattr(inverter_data, 'grid_type'):
-                self.logger.info(f"Grid type read from inverter: 0x{inverter_data.grid_type:04X}")
+                self.logger.debug(f"HV 3P | Grid type read from inverter: 0x{inverter_data.grid_type:04X}")
                 if inverter_data.grid_type == 0x0000:  # Three Phase (default)
                     sunspec_ac_type = 2  # Three Phase
                 elif inverter_data.grid_type == 0x0001:  # Single Phase
