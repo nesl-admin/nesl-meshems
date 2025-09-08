@@ -181,21 +181,59 @@ class SolArk3PhaseClient(InverterClient):
                 self._grid_total_power_low = registers[0]
             
             elif block.block_type == SolArk3PhaseBlockType.LOAD_3PHASE_MEASUREMENTS:
-                # Grid Power High Words - Registers 687-690 (L1, L2, L3, Total)
-                grid_power_l1_high = registers[0]
-                grid_power_l2_high = registers[1]
-                grid_power_l3_high = registers[2]
-                grid_total_power_high = registers[3]
-                
-                # Combine high and low words to get 32-bit power values
-                if hasattr(self, '_grid_power_l1_low'):
-                    self._data.grid_power_l1 = self._combine_32bit(grid_power_l1_high, self._grid_power_l1_low)
-                if hasattr(self, '_grid_power_l2_low'):
-                    self._data.grid_power_l2 = self._combine_32bit(grid_power_l2_high, self._grid_power_l2_low)
-                if hasattr(self, '_grid_power_l3_low'):
-                    self._data.grid_power_l3 = self._combine_32bit(grid_power_l3_high, self._grid_power_l3_low)
-                if hasattr(self, '_grid_total_power_low'):
-                    self._data.grid_power = self._combine_32bit(grid_total_power_high, self._grid_total_power_low)
+                if block.start_register == SolArk3PhaseRegisterMap.LOAD_VOLTAGE_L1N:
+                    # Load Phase Voltages - Registers 644-646 (L1N, L2N, L3N)
+                    self._data.load_voltage_l1n = registers[0] / SolArkScalingFactors.VOLTAGE  # 0.1V scale
+                    self._data.load_voltage_l2n = registers[1] / SolArkScalingFactors.VOLTAGE  # 0.1V scale
+                    self._data.load_voltage_l3n = registers[2] / SolArkScalingFactors.VOLTAGE  # 0.1V scale
+                    
+                    self.logger.debug(f"Load Phase Voltages - Raw registers: [{registers[0]}, {registers[1]}, {registers[2]}]")
+                    self.logger.debug(f"Load Phase Voltages - L1N: {self._data.load_voltage_l1n:.1f}V, L2N: {self._data.load_voltage_l2n:.1f}V, L3N: {self._data.load_voltage_l3n:.1f}V")
+                elif block.start_register == SolArk3PhaseRegisterMap.LOAD_FREQUENCY:
+                    # Load Frequency - Register 655
+                    self._data.load_frequency = registers[0] / SolArkScalingFactors.FREQUENCY  # 0.01Hz scale
+                    self.logger.debug(f"Load Frequency - Raw register: {registers[0]}, Scaled: {self._data.load_frequency:.2f}Hz")
+                elif block.start_register == SolArk3PhaseRegisterMap.LOAD_POWER_L1_LOW:
+                    # Load Power Low Words - Registers 650-653 (L1, L2, L3, Total)
+                    self._load_power_l1_low = registers[0]
+                    self._load_power_l2_low = registers[1]
+                    self._load_power_l3_low = registers[2]
+                    self._load_power_total_low = registers[3]
+                    self.logger.debug(f"Load Power Low Words - L1: {registers[0]}, L2: {registers[1]}, L3: {registers[2]}, Total: {registers[3]}")
+                elif block.start_register == SolArk3PhaseRegisterMap.LOAD_POWER_L1_HIGH:
+                    # Load Power High Words - Registers 656-659 (L1, L2, L3, Total)
+                    load_power_l1_high = registers[0]
+                    load_power_l2_high = registers[1]
+                    load_power_l3_high = registers[2]
+                    load_power_total_high = registers[3]
+                    
+                    # Combine high and low words to get 32-bit power values
+                    if hasattr(self, '_load_power_l1_low'):
+                        self._data.load_power_l1 = self._combine_32bit(load_power_l1_high, self._load_power_l1_low)
+                    if hasattr(self, '_load_power_l2_low'):
+                        self._data.load_power_l2 = self._combine_32bit(load_power_l2_high, self._load_power_l2_low)
+                    if hasattr(self, '_load_power_l3_low'):
+                        self._data.load_power_l3 = self._combine_32bit(load_power_l3_high, self._load_power_l3_low)
+                    if hasattr(self, '_load_power_total_low'):
+                        self._data.load_power_total = self._combine_32bit(load_power_total_high, self._load_power_total_low)
+                    
+                    self.logger.debug(f"Load Power Combined - L1: {self._data.load_power_l1}W, L2: {self._data.load_power_l2}W, L3: {self._data.load_power_l3}W, Total: {self._data.load_power_total}W")
+                else:
+                    # Grid Power High Words - Registers 687-690 (L1, L2, L3, Total)
+                    grid_power_l1_high = registers[0]
+                    grid_power_l2_high = registers[1]
+                    grid_power_l3_high = registers[2]
+                    grid_total_power_high = registers[3]
+                    
+                    # Combine high and low words to get 32-bit power values
+                    if hasattr(self, '_grid_power_l1_low'):
+                        self._data.grid_power_l1 = self._combine_32bit(grid_power_l1_high, self._grid_power_l1_low)
+                    if hasattr(self, '_grid_power_l2_low'):
+                        self._data.grid_power_l2 = self._combine_32bit(grid_power_l2_high, self._grid_power_l2_low)
+                    if hasattr(self, '_grid_power_l3_low'):
+                        self._data.grid_power_l3 = self._combine_32bit(grid_power_l3_high, self._grid_power_l3_low)
+                    if hasattr(self, '_grid_total_power_low'):
+                        self._data.grid_power = self._combine_32bit(grid_total_power_high, self._grid_total_power_low)
             
             elif block.block_type == SolArk3PhaseBlockType.CORRECTED_BATTERY_CAPACITY_107:
                 # Grid Apparent Power Low - Register 608
@@ -294,8 +332,16 @@ class SolArk3PhaseClient(InverterClient):
                     self._data.battery_1_voltage = registers[0] / SolArkScalingFactors.VOLTAGE
                 elif block.start_register == SolArk3PhaseRegisterMap.BATTERY_1_POWER:
                     # Battery 1 Power/Current - Registers 590-591
-                    self._data.battery_1_power = self._correct_signed_value(registers[0])  # int16
+                    raw_power = self._correct_signed_value(registers[0])  # int16
+                    self._data.battery_1_power = raw_power * 10  # Scale by 10 for watts
                     self._data.battery_1_current = self._correct_signed_value(registers[1]) / SolArkScalingFactors.CURRENT  # int16
+                    self.logger.debug(f"Battery 1 Power - Raw register: {raw_power}, Scaled: {self._data.battery_1_power}W")
+                elif block.start_register == SolArk3PhaseRegisterMap.BATTERY_1_TEMPERATURE:
+                    # Battery 1 Temperature - Register 586
+                    self._data.battery_1_temperature = (registers[0] - SolArkScalingFactors.TEMPERATURE_OFFSET) / SolArkScalingFactors.TEMPERATURE_SCALE
+                    # Also set legacy battery_temperature for backward compatibility
+                    self._data.battery_temperature = self._data.battery_1_temperature
+                    self.logger.debug(f"Battery 1 Temperature - Raw register: {registers[0]}, Scaled: {self._data.battery_1_temperature:.1f}°C")
             
             elif block.block_type == SolArk3PhaseBlockType.MODEL_714_BATTERY2_MEASUREMENTS:
                 if block.start_register == SolArk3PhaseRegisterMap.BATTERY_2_VOLTAGE:
@@ -304,7 +350,13 @@ class SolArk3PhaseClient(InverterClient):
                 elif block.start_register == SolArk3PhaseRegisterMap.BATTERY_2_CURRENT:
                     # Battery 2 Current/Power - Registers 594-595
                     self._data.battery_2_current = self._correct_signed_value(registers[0]) / SolArkScalingFactors.CURRENT  # int16
-                    self._data.battery_2_power = self._correct_signed_value(registers[1])  # int16
+                    raw_power = self._correct_signed_value(registers[1])  # int16
+                    self._data.battery_2_power = raw_power * 10  # Scale by 10 for watts
+                    self.logger.debug(f"Battery 2 Power - Raw register: {raw_power}, Scaled: {self._data.battery_2_power}W")
+                elif block.start_register == SolArk3PhaseRegisterMap.BATTERY_2_TEMPERATURE:
+                    # Battery 2 Temperature - Register 596
+                    self._data.battery_2_temperature = (registers[0] - SolArkScalingFactors.TEMPERATURE_OFFSET) / SolArkScalingFactors.TEMPERATURE_SCALE
+                    self.logger.debug(f"Battery 2 Temperature - Raw register: {registers[0]}, Scaled: {self._data.battery_2_temperature:.1f}°C")
             
             # Update total PV power to include PV4
             if hasattr(self._data, 'pv4_power'):
@@ -399,6 +451,10 @@ class SolArk3PhaseClient(InverterClient):
             registers = self._read_holding_registers(block.start_register, block.num_registers)
             
             if registers is not None:
+                # Special logging for load voltage registers
+                if block.start_register == SolArk3PhaseRegisterMap.LOAD_VOLTAGE_L1N:
+                    self.logger.debug(f"Polling Load Voltage registers 644-646: {block.description}")
+                
                 self._process_block(block, registers)
                 self.logger.debug(f"Successfully polled block: {block.description}")
                 success_count += 1

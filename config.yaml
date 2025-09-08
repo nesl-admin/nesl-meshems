@@ -3,8 +3,8 @@
 
 # Inverter Configuration
 inverter:
-  type: "solark_split_phase"  # Options: "solark_split_phase", "solark_3phase"
-  #type: "solark_3phase"
+  #type: "solark_split_phase"  # Options: "solark_split_phase", "solark_3phase"
+  type: "solark_3phase"
   modbus_address: 1
   poll_interval: 1.0  # seconds
   max_retries: 3
@@ -13,8 +13,8 @@ inverter:
 # Serial/RS485 Configuration
 serial:
   # Primary RS485 port for Sol-Ark communication
-  #port: "/dev/tty.usbserial-A10OGBLS"  # Change to your actual RS485 device
-  port: "/dev/ttyRS485" #Default port for Compulab devices
+  port: "/dev/tty.usbserial-A10OGBLS"  # Change to your actual RS485 device
+  #port: "/dev/ttyRS485" #Default port for Compulab devices
   baudrate: 9600
   bytesize: 8
   parity: "N"  # None
@@ -26,8 +26,8 @@ serial:
 sunspec_server:
   enabled: true
   #host: "127.0.0.1"      # Listen on all interfaces
-  #host: "192.168.95.28"  # Local Testing IP
-  host: "192.168.1.10"    #Default Compulab Static IP
+  host: "192.168.0.231"  # Local Testing IP
+  #host: "192.168.1.10"    #Default Compulab Static IP
   port: 8502
   slave: 1
 

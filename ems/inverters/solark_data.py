@@ -165,13 +165,16 @@ class SolArk3PhaseData(SolArkDataBase):
     grid_reactive_power_l3: float = 0.0    # Register 712 - Grid Phase C Reactive Power
     grid_reactive_power_total: float = 0.0 # Sum of L1, L2, L3 reactive power
     
-    # Load measurements (L1, L2, L3) - placeholder for future implementation
+    # Load measurements (L1, L2, L3) - from CSV mapping
     load_power_l1: float = 0.0
     load_power_l2: float = 0.0
     load_power_l3: float = 0.0
     load_current_l1: float = 0.0
     load_current_l2: float = 0.0
     load_current_l3: float = 0.0
+    load_voltage_l1n: float = 0.0      # Register 644 - Load Phase A Voltage
+    load_voltage_l2n: float = 0.0      # Register 645 - Load Phase B Voltage
+    load_voltage_l3n: float = 0.0      # Register 646 - Load Phase C Voltage
     load_frequency: float = 0.0
     
     # Inverter measurements (L1, L2, L3) - placeholder for future implementation
@@ -214,9 +217,11 @@ class SolArk3PhaseData(SolArkDataBase):
     battery_1_voltage: float = 0.0             # Register 587 - Battery 1 Voltage
     battery_1_current: float = 0.0             # Register 591 - Battery 1 Current (int16)
     battery_1_power: float = 0.0               # Register 590 - Battery 1 Output Power (int16)
+    battery_1_temperature: float = 0.0         # Register 586 - Battery 1 Temperature
     battery_2_voltage: float = 0.0             # Register 593 - Battery 2 Voltage
     battery_2_current: float = 0.0             # Register 594 - Battery 2 Current (int16)
     battery_2_power: float = 0.0               # Register 595 - Battery 2 Output Power (int16)
+    battery_2_temperature: float = 0.0         # Register 596 - Battery 2 Temperature
     
     def get_phase_count(self) -> int:
         return 3

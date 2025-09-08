@@ -813,18 +813,21 @@ class SunSpecMapper:
             self.battery_model.battery_soc_713 = getattr(inverter_data, 'battery_soc_713', 0.0)
             self.battery_model.battery_soh = getattr(inverter_data, 'battery_soh', 100.0)
             
-            # Calculate energy capacity using Model 713 data (register 592 * nominal voltage)
+            # Calculate energy capacity using Model 713 data (register 592 * actual measured voltage)
             capacity_ah = self.battery_model.battery_calculated_capacity if self.battery_model.battery_calculated_capacity > 0 else self.battery_model.battery_capacity
             # Use Model 714 battery voltage if available (register 587), otherwise use legacy voltage
             voltage = getattr(inverter_data, 'battery_1_voltage', self.battery_model.battery_voltage)
+            if voltage <= 0:
+                voltage = 51.2  # Fallback to nominal voltage if no measurement available
             self.battery_model.battery_energy_capacity = capacity_ah * voltage
+            self.logger.debug(f"Battery Energy Capacity - Capacity: {capacity_ah}Ah, Voltage: {voltage:.1f}V, Energy: {self.battery_model.battery_energy_capacity:.0f}Wh")
             
             self.battery_model.battery_status = self._map_storage_status(inverter_data)
             
             # Update Modbus registers for both models
             self.update_grid_registers_from_inverter(inverter_data)
             self.update_load_registers_from_inverter(inverter_data)
-            self._update_battery_registers()
+            self._update_battery_registers(inverter_data)
             self._update_dc_model_from_inverter(inverter_data)
             
             self.logger.debug(f"Updated SunSpec Grid, Load, and DC models with {inverter_data.get_inverter_type()} data")
@@ -1161,9 +1164,9 @@ class SunSpecMapper:
         
         # Vendor-specific status information - Offset (123-154) - 32 registers for string
         if phase_count == 3:
-            alarm_info = alarm_info = f"Kilroy was here"
+            alarm_info = alarm_info = f"Grid Port Model"
         else:
-            alarm_info = f"Kilroy was here"
+            alarm_info = f"Grid Port Model"
         self._set_string_registers(SunSpecRegisterMap.GRID_MODEL_BASE + 123, alarm_info, 32)
     
     
@@ -1281,9 +1284,18 @@ class SunSpecMapper:
                                    getattr(inverter_data, 'load_current_l3', 0))
         
         self._set_register(SunSpecRegisterMap.LOAD_AC_CURRENT, int(load_current_total * 100))  # Scale by 100
-        # Using inverter voltage as approximation for load voltage
-        self._set_register(SunSpecRegisterMap.LOAD_AC_VOLTAGE_LL, int(inverter_data.inverter_voltage * 10))
-        self._set_register(SunSpecRegisterMap.LOAD_AC_VOLTAGE_LN, int(getattr(inverter_data, 'inverter_voltage_ln', 0) * 10))
+        
+        # Voltage measurements - different for 3-phase vs split-phase
+        if 'split_phase' in inverter_type_str.lower() or 'single' in inverter_type_str.lower():
+            # Split-phase: use inverter voltage as approximation for load voltage
+            self._set_register(SunSpecRegisterMap.LOAD_AC_VOLTAGE_LL, int(inverter_data.inverter_voltage * 10))
+            self._set_register(SunSpecRegisterMap.LOAD_AC_VOLTAGE_LN, int(getattr(inverter_data, 'inverter_voltage_ln', 0) * 10))
+        else:
+            # 3-phase: use actual load voltage from registers 644-646
+            load_voltage_l1n = getattr(inverter_data, 'load_voltage_l1n', 0)
+            self._set_register(SunSpecRegisterMap.LOAD_AC_VOLTAGE_LL, int(load_voltage_l1n * 1.732 * 10))  # LLV: Load Phase A Voltage * sqrt(3)
+            self._set_register(SunSpecRegisterMap.LOAD_AC_VOLTAGE_LN, int(load_voltage_l1n * 10))  # LNV: Load Phase A Voltage (register 644)
+            self.logger.debug(f"SunSpec Load LLV/LNV - L1N: {load_voltage_l1n:.1f}V, LLV: {int(load_voltage_l1n * 1.732 * 10)}, LNV: {int(load_voltage_l1n * 10)}")
         
         # Frequency
         frequency_scaled = int(inverter_data.load_frequency * 100)
@@ -1319,41 +1331,58 @@ class SunSpecMapper:
             # 3-phase L1, L2, and L3 measurements
             self._set_register(SunSpecRegisterMap.LOAD_MODEL_BASE + 41, int(inverter_data.load_power_l1))  # WL1: Load L1 power
             self._set_register(SunSpecRegisterMap.LOAD_MODEL_BASE + 45, int(inverter_data.load_current_l1 * 100))  # Current L1
-            self._set_register(SunSpecRegisterMap.LOAD_MODEL_BASE + 46, int(getattr(inverter_data, 'inverter_voltage_l1l2', inverter_data.inverter_voltage) * 10))  # VL1L2: Load voltage
-            self._set_register(SunSpecRegisterMap.LOAD_MODEL_BASE + 47, int(getattr(inverter_data, 'inverter_voltage_l1n', 0) * 10))  # VL1: Load voltage L1
+            
+            # Load voltage measurements from registers 644, 645, 646
+            load_voltage_l1n = getattr(inverter_data, 'load_voltage_l1n', 0)
+            load_voltage_l2n = getattr(inverter_data, 'load_voltage_l2n', 0)
+            load_voltage_l3n = getattr(inverter_data, 'load_voltage_l3n', 0)
+            
+            self.logger.debug(f"SunSpec Load Voltages - L1N: {load_voltage_l1n:.1f}V, L2N: {load_voltage_l2n:.1f}V, L3N: {load_voltage_l3n:.1f}V")
+            
+            self._set_register(SunSpecRegisterMap.LOAD_MODEL_BASE + 46, int(load_voltage_l1n * 1.732 * 10))  # VL1L2: Load voltage L1-L2 (L1N * sqrt(3))
+            self._set_register(SunSpecRegisterMap.LOAD_MODEL_BASE + 47, int(load_voltage_l1n * 10))  # VL1: Load Phase A Voltage (register 644)
             
             self._set_register(SunSpecRegisterMap.LOAD_MODEL_BASE + 64, int(inverter_data.load_power_l2))  # WL2: Load L2 power
             self._set_register(SunSpecRegisterMap.LOAD_MODEL_BASE + 68, int(inverter_data.load_current_l2 * 100))  # Current L2
-            self._set_register(SunSpecRegisterMap.LOAD_MODEL_BASE + 70, int(getattr(inverter_data, 'inverter_voltage_l2n', 0) * 10))  # VL2: Load voltage L2
+            self._set_register(SunSpecRegisterMap.LOAD_MODEL_BASE + 70, int(load_voltage_l2n * 10))  # VL2: Load Phase B Voltage (register 645)
             
             # L3 measurements (using L3 registers in SunSpec Model 701)
             self._set_register(SunSpecRegisterMap.LOAD_MODEL_BASE + 87, int(getattr(inverter_data, 'load_power_l3', 0)))  # WL3: Load L3 power
             self._set_register(SunSpecRegisterMap.LOAD_MODEL_BASE + 91, int(getattr(inverter_data, 'load_current_l3', 0) * 100))  # Current L3
-            self._set_register(SunSpecRegisterMap.LOAD_MODEL_BASE + 89, int(getattr(inverter_data, 'inverter_voltage_l3n', 0) * 10))  # VL3: Load voltage L3
+            self._set_register(SunSpecRegisterMap.LOAD_MODEL_BASE + 89, int(load_voltage_l3n * 10))  # VL3: Load Phase C Voltage (register 646)
+            
+            self.logger.debug(f"SunSpec Load Register Values - VL1: {int(load_voltage_l1n * 10)}, VL2: {int(load_voltage_l2n * 10)}, VL3: {int(load_voltage_l3n * 10)}")
         
         # Vendor-specific status information
         if phase_count == 3:
-            alarm_info = alarm_info = f"Kilroy was here"
+            alarm_info = alarm_info = f"Load Port Model"
         else:
-            alarm_info = alarm_info = f"Kilroy was here"
+            alarm_info = alarm_info = f"Load Port Model"
         self._set_string_registers(SunSpecRegisterMap.LOAD_MODEL_BASE + 123, alarm_info, 32)
     
     
-    def _update_battery_registers(self):
+    def _update_battery_registers(self, inverter_data):
         """Update storage model (713) registers using correct Sol-Ark register mappings from CSV"""
         # SunSpec Model 713 implementation based on CSV mapping
         
         # Energy Rating (WHRtg) - from register 592 (Battery 1 Calculated Capacity)
         # CSV notes: "In Ah, battery_capacity_ah * 409.6"
-        # Convert Ah to Wh using nominal voltage
+        # Convert Ah to Wh using actual measured DC battery voltage
         if hasattr(self.battery_model, 'battery_calculated_capacity') and self.battery_model.battery_calculated_capacity > 0:
             battery_capacity_ah = self.battery_model.battery_calculated_capacity
         else:
             battery_capacity_ah = self.battery_model.battery_capacity
         
-        nominal_voltage = 51.2  # Typical 48V LFP system (409.6V / 8 cells = 51.2V per cell group)
-        energy_rating = int(battery_capacity_ah * nominal_voltage)  # Wh = Ah * V
+        # Use actual measured DC battery voltage instead of nominal voltage
+        # Use Model 714 battery voltage if available (register 587), otherwise use legacy voltage
+        actual_voltage = getattr(inverter_data, 'battery_1_voltage', self.battery_model.battery_voltage)
+        
+        if actual_voltage <= 0:
+            actual_voltage = 51.2  # Fallback to nominal voltage if no measurement available
+        
+        energy_rating = int(battery_capacity_ah * actual_voltage)  # Wh = Ah * V
         self._set_register(SunSpecRegisterMap.STORAGE_ENERGY_RATING, energy_rating)
+        self.logger.debug(f"Energy Rating - Capacity: {battery_capacity_ah}Ah, Voltage: {actual_voltage:.1f}V, Rating: {energy_rating}Wh")
         
         # State of Charge (SoC) - from register 588 (Battery 1 SOC)
         if hasattr(self.battery_model, 'battery_soc_713') and self.battery_model.battery_soc_713 > 0:
@@ -1425,7 +1454,8 @@ class SunSpecMapper:
                 # Use Model 714 battery fields (registers 587, 591, 590)
                 self.dc_model.ports[4].dc_voltage = inverter_data.battery_1_voltage
                 self.dc_model.ports[4].dc_current = inverter_data.battery_1_current
-                self.dc_model.ports[4].dc_power = inverter_data.battery_1_power
+                self.dc_model.ports[4].dc_power = inverter_data.battery_1_power  # No scaling - register 590 is already in watts
+                self.logger.debug(f"Battery 1 Power - Raw value: {inverter_data.battery_1_power}W (register 590)")
             else:
                 # Fallback to legacy battery fields for backward compatibility
                 self.dc_model.ports[4].dc_voltage = getattr(inverter_data, 'battery_voltage', 0.0)
@@ -1440,7 +1470,7 @@ class SunSpecMapper:
                 if hasattr(inverter_data, 'battery_2_voltage') and hasattr(inverter_data, 'battery_2_current') and hasattr(inverter_data, 'battery_2_power'):
                     self.dc_model.ports[5].dc_voltage = inverter_data.battery_2_voltage
                     self.dc_model.ports[5].dc_current = inverter_data.battery_2_current
-                    self.dc_model.ports[5].dc_power = inverter_data.battery_2_power
+                    self.dc_model.ports[5].dc_power = inverter_data.battery_2_power  # No scaling - register 595 is already in watts
                     self.dc_model.ports[5].dc_status = 1 if abs(inverter_data.battery_2_power) > 10 else 0  # ON if power > 10W
                     self.dc_model.ports[5].temperature = getattr(inverter_data, 'battery_temperature', 25.0)
                 else:

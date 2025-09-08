@@ -99,6 +99,26 @@ class SolArk3PhaseRegisterMap(SolArkRegisterMap):
     BATTERY_2_VOLTAGE = 593             # Battery 2 Voltage
     BATTERY_2_CURRENT = 594             # Battery 2 Current (int16)
     BATTERY_2_POWER = 595               # Battery 2 Output Power (int16)
+    
+    # Load voltage measurements (3-phase) - from CSV mapping
+    LOAD_VOLTAGE_L1N = 644              # Load Phase A Voltage
+    LOAD_VOLTAGE_L2N = 645              # Load Phase B Voltage
+    LOAD_VOLTAGE_L3N = 646              # Load Phase C Voltage
+    LOAD_FREQUENCY = 655                # Load Frequency
+    
+    # Battery temperatures (3-phase specific) - from CSV mapping
+    BATTERY_1_TEMPERATURE = 586         # Battery 1 Temperature
+    BATTERY_2_TEMPERATURE = 596         # Battery 2 Temperature
+    
+    # Load power measurements (3-phase) - from CSV mapping
+    LOAD_POWER_L1_LOW = 650             # Load Side Phase A Power Low Word
+    LOAD_POWER_L2_LOW = 651             # Load Side Phase B Power Low Word
+    LOAD_POWER_L3_LOW = 652             # Load Side Phase C Power Low Word
+    LOAD_POWER_TOTAL_LOW = 653          # Load Side Total Active Power Low Word
+    LOAD_POWER_L1_HIGH = 656            # Load Side Phase A Power High Word
+    LOAD_POWER_L2_HIGH = 657            # Load Side Phase B Power High Word
+    LOAD_POWER_L3_HIGH = 658            # Load Side Phase C Power High Word
+    LOAD_POWER_TOTAL_HIGH = 659         # Load Side Total Active Power High Word
 
 
 class SolArk3PhaseBlockType(Enum):
@@ -408,5 +428,53 @@ SOLARK_3PHASE_READ_BLOCKS: List[ModbusReadBlock] = [
         SolArk3PhaseRegisterMap.BATTERY_2_CURRENT,
         2,  # Current and Power (594-595)
         "Battery 2 Current/Power (594-595)"
+    ),
+    
+    # Load voltage measurements (3-phase)
+    ModbusReadBlock(
+        SolArk3PhaseBlockType.LOAD_3PHASE_MEASUREMENTS,
+        SolArk3PhaseRegisterMap.LOAD_VOLTAGE_L1N,
+        3,  # Registers 644-646 (L1N, L2N, L3N)
+        "Load Phase Voltages (644-646)"
+    ),
+    
+    # Load frequency measurement (3-phase)
+    ModbusReadBlock(
+        SolArk3PhaseBlockType.LOAD_3PHASE_MEASUREMENTS,
+        SolArk3PhaseRegisterMap.LOAD_FREQUENCY,
+        1,  # Register 655
+        "Load Frequency (655)"
+    ),
+    
+    # Load power measurements low words (3-phase)
+    ModbusReadBlock(
+        SolArk3PhaseBlockType.LOAD_3PHASE_MEASUREMENTS,
+        SolArk3PhaseRegisterMap.LOAD_POWER_L1_LOW,
+        4,  # Registers 650-653 (L1, L2, L3, Total low words)
+        "Load Power Low Words (650-653)"
+    ),
+    
+    # Load power measurements high words (3-phase)
+    ModbusReadBlock(
+        SolArk3PhaseBlockType.LOAD_3PHASE_MEASUREMENTS,
+        SolArk3PhaseRegisterMap.LOAD_POWER_L1_HIGH,
+        4,  # Registers 656-659 (L1, L2, L3, Total high words)
+        "Load Power High Words (656-659)"
+    ),
+    
+    # Battery 1 temperature (3-phase)
+    ModbusReadBlock(
+        SolArk3PhaseBlockType.MODEL_714_BATTERY1_MEASUREMENTS,
+        SolArk3PhaseRegisterMap.BATTERY_1_TEMPERATURE,
+        1,  # Register 586
+        "Battery 1 Temperature (586)"
+    ),
+    
+    # Battery 2 temperature (3-phase)
+    ModbusReadBlock(
+        SolArk3PhaseBlockType.MODEL_714_BATTERY2_MEASUREMENTS,
+        SolArk3PhaseRegisterMap.BATTERY_2_TEMPERATURE,
+        1,  # Register 596
+        "Battery 2 Temperature (596)"
     ),
 ]
