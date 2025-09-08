@@ -1463,7 +1463,8 @@ class SunSpecMapper:
                 self.dc_model.ports[4].dc_power = getattr(inverter_data, 'battery_power', 0.0)
             
             self.dc_model.ports[4].dc_status = 1 if abs(self.dc_model.ports[4].dc_power) > 10 else 0  # ON if power > 10W
-            self.dc_model.ports[4].temperature = getattr(inverter_data, 'battery_temperature', 25.0)
+            # Use 3-phase specific battery 1 temperature if available, otherwise fallback to legacy
+            self.dc_model.ports[4].temperature = getattr(inverter_data, 'battery_1_temperature', getattr(inverter_data, 'battery_temperature', 25.0))
             
             # ESS Port 2 - Battery 2 measurements (only for 3-phase systems with 6 ports)
             if self.dc_model.num_ports == 6 and len(self.dc_model.ports) > 5:
@@ -1472,7 +1473,8 @@ class SunSpecMapper:
                     self.dc_model.ports[5].dc_current = inverter_data.battery_2_current
                     self.dc_model.ports[5].dc_power = inverter_data.battery_2_power  # No scaling - register 595 is already in watts
                     self.dc_model.ports[5].dc_status = 1 if abs(inverter_data.battery_2_power) > 10 else 0  # ON if power > 10W
-                    self.dc_model.ports[5].temperature = getattr(inverter_data, 'battery_temperature', 25.0)
+                    # Use 3-phase specific battery 2 temperature if available, otherwise fallback to legacy
+                    self.dc_model.ports[5].temperature = getattr(inverter_data, 'battery_2_temperature', getattr(inverter_data, 'battery_temperature', 25.0))
                 else:
                     # Battery 2 not available - set to zero
                     self.dc_model.ports[5].dc_voltage = 0.0
